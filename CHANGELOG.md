@@ -26,5 +26,10 @@
   `data list|pull-binance|quote-databento`, `kill`, `kill-reset`, `note`; `--json` (`atlas.cli/1`).
 
 ### Doğrulama
-- `verify m1`: 15/16. Kırmızı: `prop_config_filled` (Arman, OPEN_QUESTIONS #2).
-- Gerçek veri: BTCUSDT 1.050.655 bar; rastgele giriş p=0,42 (maliyetsiz ≈ 0), al-tut birebir.
+- `verify m1`: 18/19. Kırmızı: `prop_config_filled` (Arman, OPEN_QUESTIONS #2).
+- Gerçek veri: BTCUSDT 1.050.655 + ETHUSDT 1.050.665 bar; rastgele giriş maliyetsiz ≈ 0 (p=0,42), al-tut birebir.
+
+### Güvenlik (otomatik inceleme sonrası)
+- RiskGate: tetiklenmiş stop girişlerinde risk, en kötü dolum fiyatından (`risk_entry_ref`) hesaplanır.
+- CLI: `journal export` yalnız `var/exports/<ad>`, üzerine yazmaz; Grok için `--home` yasak;
+  kill gerekçesi/not/strateji kimliğinde kontrol karakteri reddedilir, journal metni ekrana arındırılarak basılır.

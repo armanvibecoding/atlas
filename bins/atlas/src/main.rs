@@ -77,8 +77,8 @@ enum Cmd {
 enum JournalCmd {
     /// Baştan katlayıp checkpoint'leri doğrular.
     Replay,
-    /// Tutarlı anlık görüntü (SQLite backup API).
-    Export { dest: PathBuf },
+    /// Tutarlı anlık görüntü (SQLite backup API) → var/exports/<ad>. Var olan dosyanın üzerine yazmaz.
+    Export { name: String },
     /// Mevcut durumun hash'iyle checkpoint yaz.
     Checkpoint,
 }
@@ -187,8 +187,32 @@ fn main() -> ExitCode {
     }
 }
 
+fn is_grok() -> bool {
+    std::env::var("ATLAS_ROLE").is_ok_and(|r| r.eq_ignore_ascii_case("grok"))
+}
+
+/// Journal'dan gelen metni terminale basmadan önce kontrol karakterlerinden arındırır.
+pub fn printable(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(500).collect()
+}
+
+/// Girdi metni: kontrol karakteri yok, en fazla `max` karakter.
+fn clean_input(s: &str, max: usize) -> Result<String> {
+    let t = s.trim();
+    if t.chars().any(char::is_control) {
+        bail!("metin kontrol karakteri içeremez");
+    }
+    if t.chars().count() > max {
+        bail!("metin en fazla {max} karakter");
+    }
+    Ok(t.to_string())
+}
+
 fn run(cli: Cli, out: &Out) -> Result<bool> {
     guard_role(&cli.cmd)?;
+    if is_grok() && cli.home.is_some() {
+        bail!("izin yok: --home yalnız Arman (Grok'un ATLAS_HOME'u sarmalayıcıda sabittir)");
+    }
     let h = Home::locate(cli.home)?;
     match cli.cmd {
         Cmd::Status => status(&h, out),
@@ -275,7 +299,7 @@ fn status(h: &Home, out: &Out) -> Result<bool> {
             s += "  kill switch: yok\n";
         } else {
             for (k, r) in &p.kills {
-                s += &format!("  KILL {k}: {r}\n");
+                s += &format!("  KILL {}: {}\n", printable(k), printable(r));
             }
         }
         s += &format!("  prop config: {}\n", data["prop"]);
@@ -410,7 +434,23 @@ fn journal(h: &Home, out: &Out, cmd: JournalCmd) -> Result<bool> {
             });
             Ok(ok)
         }
-        JournalCmd::Export { dest } => {
+        JournalCmd::Export { name } => {
+            // Yalnız düz dosya adı; dizin ayırıcı, '..' ve var olan dosya reddedilir.
+            let ok_name = !name.is_empty()
+                && name.len() <= 100
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                && !name.starts_with('.');
+            if !ok_name {
+                bail!("geçersiz ad {name:?}: yalnız [A-Za-z0-9._-], dizin yok");
+            }
+            let dir = h.path("var/exports");
+            std::fs::create_dir_all(&dir)?;
+            let dest = dir.join(&name);
+            if dest.exists() {
+                bail!("{} zaten var; üzerine yazılmaz", dest.display());
+            }
             let j = open_journal(h)?;
             j.export_snapshot(&dest)?;
             out.emit("journal.export", true, json!({"dest": dest}), || {
@@ -502,7 +542,8 @@ fn data(h: &Home, out: &Out, cmd: DataCmd) -> Result<bool> {
 }
 
 fn kill(h: &Home, out: &Out, scope: &str, reason: &str) -> Result<bool> {
-    if reason.trim().is_empty() {
+    let reason = clean_input(reason, 500)?;
+    if reason.is_empty() {
         bail!("gerekçe zorunlu: atlas kill <scope> <gerekçe>");
     }
     let s = KillScope::parse(scope).map_err(|e| anyhow!(e))?;
@@ -563,7 +604,7 @@ fn note(h: &Home, out: &Out, text: Vec<String>) -> Result<bool> {
     if t.trim().is_empty() {
         std::io::stdin().read_to_string(&mut t)?;
     }
-    let t = t.trim().to_string();
+    let t = clean_input(&t.replace(['\n', '\r', '\t'], " "), 4000)?;
     if t.is_empty() {
         bail!("not boş");
     }

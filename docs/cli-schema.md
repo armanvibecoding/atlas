@@ -59,9 +59,10 @@ data: {"milestone": "m1", "green": bool, "passed": n, "total": n,
        "checks": [{"name", "pass", "detail"}]}
 ```
 
-### `journal replay | export <dosya> | checkpoint`
+### `journal replay | export <ad> | checkpoint`
 - replay: `{"events", "checkpoints", "mismatches": [..], "final_hash"}`, tutarsızsa çıkış 1.
-- export: tutarlı anlık görüntü (SQLite backup API).
+- export: tutarlı anlık görüntü (SQLite backup API) → `var/exports/<ad>`; ad yalnız `[A-Za-z0-9._-]`, var olan dosyaya yazmaz.
+- Grok rolünde `--home` reddedilir.
 - checkpoint: yalnız Arman.
 
 ### `data list | pull-binance --symbol S --from YYYY-AA --to YYYY-AA | quote-databento ...`

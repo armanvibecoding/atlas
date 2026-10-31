@@ -840,3 +840,38 @@ proptest! {
         }
     }
 }
+
+/// Tetiklenmiş stop girişi piyasadan dolar: risk stop fiyatından değil, son fiyattan hesaplanır.
+#[test]
+fn triggered_stop_entry_uses_worst_fill_for_risk() {
+    let (env, s, nq) = setup();
+    let g = RiskGate::new(env);
+    let mut i = open("a", nq, tue10(), Side::Buy, 1, 83_890);
+    if let Action::Open { entry, .. } = &mut i.action {
+        // Son fiyat 84_000; alış stopu 83_900 zaten tetikli.
+        *entry = EntryType::Stop(Price(83_900));
+    }
+    // Saf hesap: (10+2)×5+4 = $64 ≤ $400. Gerçek: (110+2)×5+4 = $564 > $400.
+    assert!(matches!(
+        reason(&g.check(&s, &i)),
+        Some(RejectReason::RiskPerTrade { .. })
+    ));
+    // Tetiklenmemiş stop (fiyatın üstünde) kendi fiyatından hesaplanır ve geçer.
+    let mut j = open("a", nq, tue10(), Side::Buy, 1, 84_090);
+    if let Action::Open { entry, .. } = &mut j.action {
+        *entry = EntryType::Stop(Price(84_100));
+    }
+    assert!(g.check(&s, &j).is_approved());
+    assert_eq!(
+        risk_entry_ref(
+            Side::Sell,
+            EntryType::Stop(Price(84_100)),
+            Some(Price(84_000))
+        ),
+        Some(Price(84_000))
+    );
+    assert_eq!(
+        risk_entry_ref(Side::Buy, EntryType::Stop(Price(1)), None),
+        None
+    );
+}

@@ -88,6 +88,23 @@ impl Decision {
     }
 }
 
+/// Risk hesabında kullanılacak giriş fiyatı: gerçekleşebilecek **en kötü** dolum.
+///
+/// - Piyasa: son fiyat.
+/// - Limit: limit fiyatı (dolum bundan kötü olamaz).
+/// - Stop: tetiklenmişse piyasadan dolar → alışta `max(stop, son)`, satışta `min(stop, son)`.
+///   Son fiyat yoksa `None` (risk sınırlanamaz → red).
+pub fn risk_entry_ref(side: Side, entry: EntryType, last: Option<Price>) -> Option<Price> {
+    match entry {
+        EntryType::Market => last,
+        EntryType::Limit(p) => Some(p),
+        EntryType::Stop(p) => last.map(|l| match side {
+            Side::Buy => p.max(l),
+            Side::Sell => p.min(l),
+        }),
+    }
+}
+
 /// Bir girişin stopa kadar en kötü kaybı: mesafe + kayma tamponu, iki yön ücret.
 pub fn entry_risk(
     inst: &Instrument,
@@ -190,12 +207,8 @@ impl RiskGate {
         if qty <= 0 {
             return Err(RejectReason::BadQty);
         }
-        let entry_ref = match entry {
-            EntryType::Market => state
-                .last_price(intent.instrument)
-                .ok_or(RejectReason::NoPrice)?,
-            EntryType::Limit(p) | EntryType::Stop(p) => *p,
-        };
+        let entry_ref = risk_entry_ref(side, *entry, state.last_price(intent.instrument))
+            .ok_or(RejectReason::NoPrice)?;
         let stop_ok = match side {
             Side::Buy => stop < entry_ref,
             Side::Sell => stop > entry_ref,

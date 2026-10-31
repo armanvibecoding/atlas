@@ -20,7 +20,7 @@ Her komut `--json` destekler; şema `docs/cli-schema.md` (`atlas.cli/1`).
 | `atlas events [--since] [--prio] [--kind] [--limit]` | olay kuyruğu | ✓ |
 | `atlas verify m1` | M1 kabul testleri | ✓ |
 | `atlas journal replay` | durumun olaylardan yeniden üretilebildiğini doğrular | ✓ |
-| `atlas journal export <dosya>` | tutarlı anlık görüntü | ✓ |
+| `atlas journal export <ad>` | tutarlı anlık görüntü → `var/exports/<ad>` (üzerine yazmaz) | ✓ |
 | `atlas data list` | veri setleri | ✓ |
 | `atlas kill <global\|account\|strategy:ID> <gerekçe>` | kill switch | ✓ |
 | `atlas note <metin>` | journal'a operatör notu | ✓ |
@@ -40,6 +40,6 @@ M2–M3'te eklenecek: `report`, `strategies`, `strategy pause|demote|resume`, `e
 
 ## Durum (2026-10-31)
 
-- M1 kodu tamam; `verify m1` 15/16 — tek kırmızı `prop_config_filled` (Arman'ın doldurması gereken firma kuralları).
+- M1 kodu tamam; `verify m1` 18/19 — tek kırmızı `prop_config_filled` (Arman'ın doldurması gereken firma kuralları).
 - Veri: Binance BTCUSDT ve ETHUSDT 1m, 2024-11 → 2026-10.
 - Webhook/outbox, daemon, sarmalayıcı: M3.

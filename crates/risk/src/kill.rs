@@ -19,7 +19,15 @@ impl KillScope {
             "global" => Ok(KillScope::Global),
             "account" => Ok(KillScope::Account),
             other => match other.strip_prefix("strategy:") {
-                Some(id) if !id.is_empty() => Ok(KillScope::Strategy(StrategyId::new(id))),
+                Some(id)
+                    if !id.is_empty()
+                        && id.len() <= 64
+                        && id
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) =>
+                {
+                    Ok(KillScope::Strategy(StrategyId::new(id)))
+                }
                 _ => Err(format!(
                     "kapsam global | account | strategy:<id> olmalı, {other:?}"
                 )),
@@ -154,6 +162,8 @@ mod tests {
             Ok(KillScope::Strategy(StrategyId::new("abc")))
         );
         assert!(KillScope::parse("strategy:").is_err());
+        assert!(KillScope::parse("strategy:a\u{1b}[2J").is_err());
+        assert!(KillScope::parse("strategy:a/b").is_err());
         assert!(KillScope::parse("everything").is_err());
     }
 }

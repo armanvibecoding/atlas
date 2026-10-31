@@ -17,7 +17,9 @@ use atlas_core::{
     InstrumentId, Intent, MarketEvent, MarketHistory, MarketPayload, Money, Price, Qty, Side,
     Strategy, StrategyId, UnixNanos,
 };
-use atlas_risk::{PendingEntry, RiskEnv, RiskGate, RiskState, Verdict, WEEKEND_FLATTEN_LEAD_MIN};
+use atlas_risk::{
+    PendingEntry, RiskEnv, RiskGate, RiskState, Verdict, WEEKEND_FLATTEN_LEAD_MIN, risk_entry_ref,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -699,16 +701,17 @@ impl<'g> Engine<'g> {
                     time_exit,
                     entry_expiry,
                 } => {
-                    let (kind, entry_ref) = match entry {
-                        EntryType::Market => (
-                            OrderKind::Market,
-                            self.state.last_price(intent.instrument).ok_or_else(|| {
-                                SimError::Internal("onaylı piyasa girişi ama fiyat yok".into())
-                            })?,
-                        ),
-                        EntryType::Limit(p) => (OrderKind::Limit(p), p),
-                        EntryType::Stop(p) => (OrderKind::Stop(p), p),
+                    let kind = match entry {
+                        EntryType::Market => OrderKind::Market,
+                        EntryType::Limit(p) => OrderKind::Limit(p),
+                        EntryType::Stop(p) => OrderKind::Stop(p),
                     };
+                    // Bekleyen girişin riski, kapının kullandığı en kötü dolum fiyatıyla izlenir.
+                    let entry_ref =
+                        risk_entry_ref(side, entry, self.state.last_price(intent.instrument))
+                            .ok_or_else(|| {
+                                SimError::Internal("onaylı giriş ama referans fiyat yok".into())
+                            })?;
                     self.state.register_pending(
                         intent.strategy.clone(),
                         intent.instrument,

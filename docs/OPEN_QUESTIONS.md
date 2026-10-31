@@ -53,7 +53,8 @@ Maliyet sorgusu + `data.max_usd_per_pull` kapısı hazır (`atlas data quote-dat
 FTMO yoluna gidilirse CME verisi yalnız karşılaştırma içindir.
 
 ### 9. Dukascopy erişimi
-İlk denemede `datafeed.dukascopy.com` 20 sn'de yanıt vermedi. FTMO hedefi için XAUUSD / NAS100 CFD verisi
+`datafeed.dukascopy.com` iki denemede de bağlanmadı (ilki zaman aşımı, ikincisi SSL bağlantı hatası —
+curl 35). Bu makinedeki ağ/VPN (WireSock kurulu) veya Dukascopy tarafı olabilir; VPS'ten denenecek. FTMO hedefi için XAUUSD / NAS100 CFD verisi
 gerekecek. Sonraki adımda tekrar denenecek (LZMA `.bi5` çözümü için yeni bağımlılık → ADR).
 
 ### 10. Veri kalite bulgusu: BTCUSDT 2025-08-29
