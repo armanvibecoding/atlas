@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # atlas-admin — Grok Bot'un SSH zorunlu komut sarmalayıcısı (§6).
 # authorized_keys:
-#   command="/usr/local/bin/atlas-admin",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... grok
+#   restrict,command="/usr/local/bin/atlas-admin" ssh-ed25519 AAAA... grok
 # Yalnız beyaz listedeki salt-okunur ya da KISITLAYICI komutlar çalışır. Risk artıran, terfi ettiren,
 # sermaye değiştiren hiçbir komut geçmez. CLI ayrıca ATLAS_ROLE=grok ile ikinci kez denetler.
 # Ret çıkış kodu: 126.

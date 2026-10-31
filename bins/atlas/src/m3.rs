@@ -559,6 +559,30 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
             bad.push(format!("yasak geçti: {c} ({code})"));
         }
     }
+    // atlas-admin atlanıp sudo yardımcısı doğrudan çağrılırsa da (argv düzeyi) yasaklar reddedilir.
+    let helper = bash_path(&h.root.join("deploy").join("atlas-grok"));
+    for args in [
+        vec!["approve", "1"],
+        vec!["kill-reset", "global"],
+        vec!["daemon", "run"],
+        vec!["gauntlet", "run", "x"],
+        vec!["risk", "set", "max", "1"],
+        vec!["status", "--home", "/tmp"],
+        vec!["--home=/tmp", "status"],
+        vec!["experiments", "run"],
+        vec!["journal", "checkpoint"],
+        vec![],
+    ] {
+        let code = bash_cmd()
+            .arg(&helper)
+            .args(&args)
+            .output()
+            .map(|o| o.status.code().unwrap_or(-1))
+            .unwrap_or(-2);
+        if code != 126 {
+            bad.push(format!("yardımcı yasak geçti: {args:?} ({code})"));
+        }
+    }
     let exe = std::env::current_exe()?;
     for args in [
         vec!["approve", "1"],

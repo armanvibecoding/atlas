@@ -82,6 +82,6 @@ Kurulum tamam.
 2) Kontrol: sudo -u atlas ATLAS_HOME=$PREFIX $PREFIX/bin/atlas verify m1
 3) Başlat: systemctl start atlas && journalctl -u atlas -f
 4) Grok anahtarı (/home/grok/.ssh/authorized_keys):
-   command="/usr/local/bin/atlas-admin",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... grok
+   restrict,command="/usr/local/bin/atlas-admin" ssh-ed25519 AAAA... grok
 5) Webhook: $PREFIX/configs/atlas.toml [webhook] url = "https://..."
 MSG
