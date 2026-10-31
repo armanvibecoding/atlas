@@ -68,7 +68,7 @@ Senin çalıştıramayacakların: `approve`, `kill-reset`, `gauntlet`, `data …
 - 6 Kasım akşamı: son raporu ver, `./remote.sh finish` ile kapat, son durumu arşivle. Eski sistem bir daha başlatılmaz.
 
 ### Aşama B — Yapım ✓ bitti
-- Atlas'ı Claude Code inşa etti. Şu an VPS'te 7 günlük deneme koşusu (gölge + paper, insansız) yapılıyor; bu sürede Atlas'a dokunmazsın.
+- Atlas'ı Claude Code inşa etti. VPS'te 7 günlük deneme koşusu (gölge + paper, insansız) **2026-10-31 23:21 TSİ** başladı, **2026-11-07 23:21 TSİ**'de biter. Bu sürede Atlas'a dokunmazsın.
 
 ### Aşama C — Devir günü (deneme bitince, Arman haber verince)
 1. `HANDOFF.md`'yi baştan sona oku (repo kökünde).

@@ -19,9 +19,9 @@
 
 | # | Koşul | Durum |
 |---|---|---|
-| 1 | `verify m1..m4` **VPS üzerinde** yeşil | ⏳ VPS yok (yerelde yeşil) |
-| 2 | 7 günlük kesintisiz gölge+paper denemesi | ⏳ VPS gerekli |
-| 3 | Grok komutları VPS'te `atlas-admin` üzerinden; izin testleri yeşil | ⏳ VPS gerekli (yerelde yeşil) |
+| 1 | `verify m1..m4` **VPS üzerinde** yeşil | ⚠ VPS'te m1 24/24, m3 5/5, m4 4/4; **m2'de yalnız hız kontrolü kırmızı** (paylaşımlı 2,0 GHz vCPU, yük ~7/8 çekirdek: tek genom 351–467 ms, NQ eşdeğeri ~270–360 ms > 200 ms; yerelde 167 ms). Referans raporları VPS'te üretildi |
+| 2 | 7 günlük kesintisiz gölge+paper denemesi | ⏳ **başladı 2026-10-31 20:21 UTC**, biter 2026-11-07 20:21 UTC (`atlas.service`) |
+| 3 | Grok komutları VPS'te `atlas-admin` üzerinden; izin testleri yeşil | ✓ sunucuda denendi (grok → atlas-admin → sudo → atlas-grok). **Grok'un SSH açık anahtarı eklenmeli** |
 | 4 | Webhook Grok'un alarm routine'ine bağlı, test olayı teslim | ⏳ URL yok |
 | 5 | `GROK_OPS.md` güncel | ✓ |
 | 6 | `HANDOFF.md` | ✓ (bu belge) |
