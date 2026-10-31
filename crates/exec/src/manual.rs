@@ -45,6 +45,11 @@ pub enum ManualOrder {
     Cancel {
         reason: String,
     },
+    /// Hesabın kill durumunu bu bara eşitle (etiket → sebep; `global` / `account`). Daemon, CLI kill/kill-reset
+    /// değişikliklerini bu kayıtla uygular ki yeniden kurulum aynı anda aynı kill durumunu görsün.
+    SyncKills {
+        kills: std::collections::BTreeMap<String, String>,
+    },
 }
 
 impl ManualOrder {
@@ -82,7 +87,7 @@ impl Strategy for ManualStrategy {
             return Vec::new();
         };
         q.drain(..)
-            .map(|o| {
+            .filter_map(|o| {
                 let action = match o.order {
                     ManualOrder::Open {
                         side,
@@ -108,13 +113,15 @@ impl Strategy for ManualStrategy {
                     },
                     ManualOrder::Close { reason } => Action::Close { reason },
                     ManualOrder::Cancel { .. } => Action::CancelEntry,
+                    // Kill eşitlemesi strateji niyeti değildir; hesap adımından önce uygulanır.
+                    ManualOrder::SyncKills { .. } => return None,
                 };
-                Intent {
+                Some(Intent {
                     strategy: self.id.clone(),
                     instrument: self.inst,
                     ts: ev.ts,
                     action,
-                }
+                })
             })
             .collect()
     }
@@ -162,6 +169,41 @@ impl ManualAccount {
         }
     }
 
+    /// Etkin kill kapsamları (etiket → sebep).
+    pub fn kills(&self) -> std::collections::BTreeMap<String, String> {
+        self.engine
+            .state()
+            .kills
+            .active()
+            .into_iter()
+            .map(|(s, r)| (s.label(), r.reason))
+            .collect()
+    }
+
+    /// Kill durumunu `wanted`'a eşitler (eksikleri tetikler, fazlaları kaldırır).
+    pub fn apply_kills(
+        &mut self,
+        wanted: &std::collections::BTreeMap<String, String>,
+        ts: UnixNanos,
+    ) {
+        let ks = &mut self.engine.state_mut().kills;
+        let active: Vec<String> = ks.active().into_iter().map(|(s, _)| s.label()).collect();
+        for (label, reason) in wanted {
+            if !active.contains(label)
+                && let Ok(sc) = atlas_risk::KillScope::parse(label)
+            {
+                ks.trigger(sc, reason, ts);
+            }
+        }
+        for a in active {
+            if !wanted.contains_key(&a)
+                && let Ok(sc) = atlas_risk::KillScope::parse(&a)
+            {
+                ks.reset(&sc, ts);
+            }
+        }
+    }
+
     /// Hesabın işlediği son olay zamanı (bundan eski barlar yok sayılır).
     pub fn last_ts(&self) -> UnixNanos {
         self.engine.last_ts()
@@ -194,8 +236,18 @@ impl ManualAccount {
                 detail: Value::Null,
             });
         }
+        // Kill eşitlemeleri barın işlenmesinden ÖNCE (canlıdaki sıra: senkron → adım).
+        for o in &orders {
+            if let ManualOrder::SyncKills { kills } = &o.order {
+                self.apply_kills(kills, ev.ts);
+            }
+        }
         if let Ok(mut q) = self.queue.lock() {
-            q.extend(orders);
+            q.extend(
+                orders
+                    .into_iter()
+                    .filter(|o| !matches!(o.order, ManualOrder::SyncKills { .. })),
+            );
         }
         self.engine.step(ev, &mut self.strategies)?;
         let events = self.engine.drain_events();
@@ -302,6 +354,7 @@ impl ManualAccount {
                         "stop": px(*stop), "target": target.map(px), "expiry_min": expiry_min, "reason": reason}),
                     ManualOrder::Close { reason } => json!({"op": "close", "reason": reason}),
                     ManualOrder::Cancel { reason } => json!({"op": "cancel", "reason": reason}),
+                    ManualOrder::SyncKills { kills } => json!({"op": "sync_kills", "kills": kills}),
                 };
                 let mut detail = o.detail.clone();
                 if let Some(p) = detail.get("price").and_then(Value::as_i64) {

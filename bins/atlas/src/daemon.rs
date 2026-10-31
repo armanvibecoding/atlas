@@ -260,19 +260,7 @@ fn sync_kills(
     ks: &mut atlas_risk::KillState,
     t: UnixNanos,
 ) {
-    let wanted: BTreeMap<String, String> = kills
-        .iter()
-        .filter_map(|(scope, reason)| match KillScope::parse(scope) {
-            Ok(KillScope::Global) => Some(("global".to_string(), reason.clone())),
-            Ok(KillScope::Account) => Some(("account".to_string(), reason.clone())),
-            Ok(KillScope::Strategy(id)) => {
-                let id = id.as_str();
-                (id == name || (!hash.is_empty() && id.len() >= 6 && hash.starts_with(id)))
-                    .then(|| ("account".to_string(), format!("strategy:{id} — {reason}")))
-            }
-            Err(_) => None,
-        })
-        .collect();
+    let wanted = wanted_kills(kills, name, hash);
     let active: Vec<String> = ks.active().into_iter().map(|(s, _)| s.label()).collect();
     for (label, reason) in &wanted {
         if !active.contains(label)
@@ -288,6 +276,27 @@ fn sync_kills(
             ks.reset(&sc, t);
         }
     }
+}
+
+/// Bir hesaba düşen kill durumu (etiket → sebep).
+fn wanted_kills(
+    kills: &BTreeMap<String, String>,
+    name: &str,
+    hash: &str,
+) -> BTreeMap<String, String> {
+    kills
+        .iter()
+        .filter_map(|(scope, reason)| match KillScope::parse(scope) {
+            Ok(KillScope::Global) => Some(("global".to_string(), reason.clone())),
+            Ok(KillScope::Account) => Some(("account".to_string(), reason.clone())),
+            Ok(KillScope::Strategy(id)) => {
+                let id = id.as_str();
+                (id == name || (!hash.is_empty() && id.len() >= 6 && hash.starts_with(id)))
+                    .then(|| ("account".to_string(), format!("strategy:{id} — {reason}")))
+            }
+            Err(_) => None,
+        })
+        .collect()
 }
 
 pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
@@ -585,13 +594,8 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
                 t,
             );
         }
-        sync_kills(
-            &kills,
-            atlas_exec::manual::GROK_ID,
-            "",
-            &mut grok.account.engine_mut().state_mut().kills,
-            t,
-        );
+        // Grok hesabı: kill durumu step_tick'te kayıtlı `SyncKills` olarak uygulanır (yeniden kurulum aynısını oynatır).
+        let grok_kills = wanted_kills(&kills, atlas_exec::manual::GROK_ID, "");
 
         // 4. Koşucuları adımla, sapma kararları
         let mut failed: Vec<String> = Vec::new();
@@ -639,7 +643,7 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             runners.remove(&h_);
         }
         // 4b. Grok operatör hesabı (ADR 0010)
-        match grok.step_tick(&sink.journal, &new_bars, t) {
+        match grok.step_tick(&sink.journal, &new_bars, t, &grok_kills) {
             Ok(evs) => events.extend(evs),
             Err(e) => events.push(
                 Event::new(

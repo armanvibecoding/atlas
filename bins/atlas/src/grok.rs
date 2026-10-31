@@ -103,8 +103,10 @@ impl GrokDesk {
         if !applied.is_empty() {
             for b in stored(start)?.into_iter().filter(|b| b.close_ts > start) {
                 let orders = applied.remove(&b.close_ts.0).unwrap_or_default();
-                // Yeniden oynatma: olaylar zaten journal'da; tekrar yayılmaz.
-                let _ = account.step(&MarketEvent::bar(inst.id, b), orders);
+                // Yeniden oynatma: olaylar zaten journal'da; tekrar yayılmaz. Hata yutulmaz.
+                account
+                    .step(&MarketEvent::bar(inst.id, b), orders)
+                    .map_err(|e| anyhow!("grok hesabı yeniden kurulamadı: {e}"))?;
             }
         }
         Ok(GrokDesk {
@@ -115,13 +117,19 @@ impl GrokDesk {
     }
 
     /// Bu tick'in piyasa olaylarını işler. Yeni istekler son barda uygulanır ve kaydedilir.
+    /// `wanted_kills`: CLI kill/kill-reset'ten türeyen ve bu hesaba düşen kill durumu; değiştiyse ilk
+    /// uygun barda `SyncKills` olarak uygulanır ve kaydedilir (yeniden kurulum aynısını oynatır).
     pub fn step_tick(
         &mut self,
         j: &Journal,
         new_events: &[MarketEvent],
         t: UnixNanos,
+        wanted_kills: &BTreeMap<String, String>,
     ) -> Result<Vec<Event>> {
         let mut out = Vec::new();
+        let first_bar = new_events.iter().position(|e| {
+            matches!(e.payload, atlas_core::MarketPayload::Bar(_)) && e.ts >= self.account.last_ts()
+        });
         // Yeni istekler bu tick'in son barında uygulanır — hesabın zaten geçtiği bir bara asla
         // (o bar işlenmez ve emir sessizce kaybolurdu). Uygun bar yoksa istekler sonraki tick'e kalır.
         let last_bar = new_events.iter().rposition(|e| {
@@ -134,6 +142,20 @@ impl GrokDesk {
         };
         for (i, e) in new_events.iter().enumerate() {
             let mut orders = self.applied.remove(&e.ts.0).unwrap_or_default();
+            if Some(i) == first_bar && *wanted_kills != self.account.kills() {
+                let o = QueuedOrder {
+                    request_seq: 0,
+                    order: ManualOrder::SyncKills {
+                        kills: wanted_kills.clone(),
+                    },
+                };
+                out.push(Event::new(
+                    t,
+                    EventKind::GrokOrderApplied,
+                    json!({"request_seq": 0, "bar_ts": e.ts.0, "order": o.order, "account": GROK_ID}),
+                ));
+                orders.insert(0, o);
+            }
             if Some(i) == last_bar {
                 for r in &reqs {
                     out.push(Event::new(
@@ -152,6 +174,13 @@ impl GrokDesk {
             out.extend(evs.into_iter().map(|mut ev| {
                 if let Value::Object(m) = &mut ev.payload {
                     m.insert("account".into(), json!(GROK_ID));
+                    // Grok hesabının kendi kill'i (günlük zarar, taban) yalnız bu hesabı kapsar: journal'da
+                    // `account` kalsaydı kill senkronu sistemin bütün paper hesaplarını da durdururdu.
+                    if ev.kind == EventKind::KillSwitch
+                        && matches!(m.get("scope").and_then(Value::as_str), Some("account"))
+                    {
+                        m.insert("scope".into(), json!(format!("strategy:{GROK_ID}")));
+                    }
                 }
                 ev
             }));
@@ -540,22 +569,22 @@ mod tests {
             .unwrap();
         };
         for (i, b) in bars.iter().enumerate() {
-            if i == 20 || i == 150 {
+            if i == 20 || i == 110 || i == 150 {
                 req(
                     &mut j,
                     ManualOrder::Open {
-                        side: if i == 20 { Side::Buy } else { Side::Sell },
+                        side: if i == 150 { Side::Sell } else { Side::Buy },
                         qty: 3,
                         limit: None,
-                        stop: Price(if i == 20 {
-                            b.close.0 - 60
-                        } else {
+                        stop: Price(if i == 150 {
                             b.close.0 + 60
-                        }),
-                        target: Some(Price(if i == 20 {
-                            b.close.0 + 90
                         } else {
+                            b.close.0 - 60
+                        }),
+                        target: Some(Price(if i == 150 {
                             b.close.0 - 90
+                        } else {
+                            b.close.0 + 90
                         })),
                         expiry_min: None,
                         reason: "test".into(),
@@ -570,8 +599,14 @@ mod tests {
                     },
                 );
             }
+            // 100–130 arası global kill (CLI kill → kill-reset) — yeniden kurulum aynı anı görmeli.
+            let wanted: BTreeMap<String, String> = if (100..130).contains(&i) {
+                [("global".to_string(), "test kill".to_string())].into()
+            } else {
+                BTreeMap::new()
+            };
             let evs = live
-                .step_tick(&j, &[MarketEvent::bar(inst.id, *b)], b.close_ts)
+                .step_tick(&j, &[MarketEvent::bar(inst.id, *b)], b.close_ts, &wanted)
                 .unwrap();
             j.append_all(&evs).unwrap();
         }
@@ -589,5 +624,18 @@ mod tests {
             rebuilt.account.snapshot(UnixNanos(1))["position"]
         );
         assert_eq!(live.last_request, rebuilt.last_request);
+        // Kill sırasında (i=110) verilen emir reddedilmiş olmalı; yeniden kurulumda da.
+        let snap = rebuilt.account.snapshot(UnixNanos(1));
+        let rejected = snap["orders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|o| o["status"] == "rejected")
+            .count();
+        assert!(rejected >= 1, "{snap}");
+        assert_eq!(
+            snap["orders"],
+            live.account.snapshot(UnixNanos(1))["orders"]
+        );
     }
 }
