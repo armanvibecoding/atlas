@@ -645,6 +645,9 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
         opts.state = dir.join("ops_state.json");
         opts.webhook_override = Some(url);
         opts.search_every_override = Some(30);
+        // Doğrulama koşusu gerçek daemon'a dokunmaz: kendi durdurma dosyası, ajan yok, yerel webhook.
+        opts.stop_file = dir.join("daemon.stop");
+        opts.disable_agents = true;
         // Bir referans stratejiyi gölgeye koy: koşucu, sapma ve olay yolu gerçek veriyle çalışsın.
         {
             let mut reg = Registry::open(&opts.registry)?;

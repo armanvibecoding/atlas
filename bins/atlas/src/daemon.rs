@@ -129,6 +129,9 @@ pub struct DaemonOpts {
     pub state: PathBuf,
     pub webhook_override: Option<String>,
     pub search_every_override: Option<u64>,
+    pub stop_file: PathBuf,
+    /// `true`: config ne derse desin LLM çağrısı yapılmaz (doğrulama koşuları).
+    pub disable_agents: bool,
 }
 
 impl DaemonOpts {
@@ -142,6 +145,8 @@ impl DaemonOpts {
             state: h.path("var/ops_state.json"),
             webhook_override: None,
             search_every_override: None,
+            stop_file: h.path("var/daemon.stop"),
+            disable_agents: false,
         }
     }
 }
@@ -313,7 +318,7 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         .search_every_override
         .unwrap_or(cfg.daemon.search_every_minutes)
         .max(1);
-    let stop_file = h.path("var/daemon.stop");
+    let stop_file = opts.stop_file.clone();
     let mut clock = UnixNanos(start.0 - start.0 % NANOS_PER_MIN);
     let mut last_agent = UnixNanos::ZERO;
     sink.emit(
@@ -566,6 +571,9 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             if let Some((d, _, _)) = &a.decision
                 && d == "approved"
                 && let Some(cur) = reg.current_stage(&a.subject)?
+                // Onay tek kullanımlık ve mevcut aşamada açılmış olmalı (düşürme sonrası yeniden kullanılamaz).
+                && !reg.approval_consumed(&a.subject, a.id)?
+                && a.created_ts >= cur.ts
             {
                 let to = match (a.kind.as_str(), cur.stage) {
                     ("micro_eval", Stage::Paper) => Some(Stage::MicroEval),
@@ -623,7 +631,8 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         }
 
         // 6. Ajanlar (yalnız sağlayıcı, fiyat ve bütçe yapılandırılmışsa)
-        if cfg.agents.provider != "none"
+        if !opts.disable_agents
+            && cfg.agents.provider != "none"
             && t.since(last_agent) >= cfg.agents.research_every_minutes * NANOS_PER_MIN
         {
             last_agent = t;
@@ -655,11 +664,16 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         sum.delivered += d.sent;
 
         // 9. Checkpoint, kalıcılık
-        if sum.ticks.is_multiple_of(cfg.daemon.checkpoint_every_minutes.max(1)) {
+        if sum
+            .ticks
+            .is_multiple_of(cfg.daemon.checkpoint_every_minutes.max(1))
+        {
             sink.journal.checkpoint(t)?;
         }
         if !replay
-            && (sum.ticks.is_multiple_of(cfg.daemon.persist_every_minutes.max(1)))
+            && (sum
+                .ticks
+                .is_multiple_of(cfg.daemon.persist_every_minutes.max(1)))
             && !unsaved.is_empty()
         {
             store.append_bars(

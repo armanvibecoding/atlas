@@ -347,7 +347,29 @@ impl Registry {
         };
         let to = base.demoted();
         self.set_stage(hash, &last.name, to, reason, actor, ts)?;
+        if last.stage == Stage::Paused && to != Stage::Retired {
+            // Düşürme duraklatmayı kaldırmaz: duraklatma, ASIL duraklatanın sahipliğiyle yeniden yazılır
+            // (aksi halde düşürme, başkasının duraklattığını dolaylı yoldan canlıya döndürürdü).
+            self.set_stage(
+                hash,
+                &last.name,
+                Stage::Paused,
+                "düşürme sonrası duraklatma korunur",
+                &last.actor,
+                ts,
+            )?;
+            return Ok(Stage::Paused);
+        }
         Ok(to)
+    }
+
+    /// Bir onay daha önce bir terfide kullanıldı mı?
+    pub fn approval_consumed(&self, subject: &str, approval_id: i64) -> Result<bool> {
+        let tag = format!("onay #{approval_id} ");
+        Ok(self
+            .stage_history(subject)?
+            .iter()
+            .any(|r| r.reason.starts_with(&tag)))
     }
 
     pub fn request_approval(
@@ -567,6 +589,15 @@ mod tests {
         assert_eq!(r.demote("h", "sapma", "grok", 7).unwrap(), Stage::Shadow);
         assert_eq!(r.demote("h", "sapma", "sistem", 8).unwrap(), Stage::Retired);
         assert_eq!(r.all_current_stages().unwrap().len(), 2);
+        // Arman'ın duraklattığı strateji Grok'un düşürmesiyle canlıya dönmez.
+        r.set_stage("h3", "s3", Stage::Paper, "x", "sistem", 9)
+            .unwrap();
+        r.pause("h3", "arman durdurdu", "arman", 10).unwrap();
+        assert_eq!(r.demote("h3", "düşür", "grok", 11).unwrap(), Stage::Paused);
+        let cur = r.current_stage("h3").unwrap().unwrap();
+        assert_eq!((cur.stage, cur.actor.as_str()), (Stage::Paused, "arman"));
+        assert!(r.resume("h3", "x", "grok", 12).is_err());
+        assert_eq!(r.resume("h3", "x", "arman", 13).unwrap(), Stage::Shadow);
         // Append-only
         assert!(r.conn.execute("DELETE FROM stages", []).is_err());
     }

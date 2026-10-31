@@ -1,5 +1,48 @@
 # Değişiklik günlüğü
 
+## M4 — Derinlik (2026-10-31)
+
+### Eklendi
+- **sim::MboQueueFill**: limit emirde kuyruk pozisyonu (L1 kotasyon + işlem akışı; MBO gelince kaynak değişir),
+  piyasa etkisi; motor `observe`/`order_closed` kancalarıyla bağlı.
+- **sim::calibration**: paper/canlı ↔ sim dolum eşleştirme, kayma ve limit dolum olasılığı kalibrasyonu,
+  sürümlü `FillParams` (`queue@vN`), atomik sürüm dosyaları.
+- **ml**: triple-barrier etiketleme, L2 lojistik regresyon (IRLS), purged k-fold + embargo, `MetaFiltered`
+  (gir/girme + boyut), deterministik JSON model.
+- **plugin**: wasmtime 50 sandbox (WASI yok, yakıt, bellek limiti, NaN kanonikleştirme, duvar saati yedeği),
+  ABI v1, `PluginStrategy`, örnek plugin (wasm32).
+- **dashboard**: axum paneli; veri `atlas --json` alt sürecinden (tek kaynak), salt-okunur beyaz liste,
+  CSP, Host denetimi, yalnız localhost; kapsam testi CLI'daki her komutun sınıflandırılmasını zorunlu kılar.
+- **CLI**: `verify m4`.
+
+### Doğrulama
+- `verify m4`: 4/4 — kalibrasyon farkı 2.02 → 0.64 tick; sandbox ağ/dosya/saat/rastgelelik reddi; dashboard
+  27 CLI komutunun tamamını kapsıyor; meta-model AUC sinyal 0.87 / gürültü 0.51.
+
+## M3 — Otonomi (2026-10-31)
+
+### Eklendi
+- **ops**: olay hunisi (journal → uyandırma → outbox), disk outbox (Idempotency-Key, üstel geri çekilme,
+  ölü kutusu), sessiz saat 23:30–09:00 TSİ, dedupe, saatlik uyandırma limiti, gece özeti, saat kayması.
+- **exec**: Binance 1m REST akışı (boşluk telafisi, kesinti ≠ fiyat), `ReplayFeed`, gölge/paper `Runner`.
+- **portfolio**: SPRT + CUSUM sapma dedektörü, Thompson allocator, rejim.
+- **registry**: terfi merdiveni (append-only), duraklat/devam/düşür izinleri, tek kullanımlık onaylar,
+  ajan → arama kuyruğu, kaynak ilerleme istatistiği.
+- **search**: evrim + Bayes (TPE benzeri) + kaynak meta-öğrenmesi; her tarama sicilde deneme.
+- **agents**: Anthropic / xAI / sahte sağlayıcı, 4 rol (sürümlü prompt), şema doğrulama, bütçe kapısı.
+- **daemon**: canlı + hızlandırılmış (sanal saat) mod, systemd watchdog, kalıcılık, checkpoint.
+- **CLI**: `daemon run`, `report daily|weekly`, `strategy pause|demote|resume`, `budget`, `approvals list|show`,
+  `approve`, `verify m3`. **deploy**: `atlas-admin`, `atlas.service`, `install.sh`, `logrotate.conf`.
+
+### Doğrulama
+- `verify m3`: 5/5 — Grok izinleri (9 izinli / 12 yasak + CLI ikinci kontrol), ajan şeması, sapma düşürmesi,
+  72 sa sanal saat dayanıklılığı (0 outbox_dead, 0 engine_failure, journal tutarlı, webhook teslimi), kurulum.
+
+### Güvenlik (otomatik inceleme sonrası)
+- Duraklatılmış strateji düşürmeyle canlıya dönemez; onay tek kullanımlık; doğrulama koşusu gerçek daemon'un
+  durdurma dosyasına ve LLM'e dokunmaz; strateji adı yalnız `strategies/` içinde (yol geçişi yok); plugin
+  stop/hedef kontrolü taşmasız, CPU tüketimine duvar saati yedeği.
+
 ## M2 — Doğruluk makinesi (2026-10-31)
 
 ### Eklendi

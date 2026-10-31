@@ -82,3 +82,22 @@ consistency_headroom, feed_down, engine_failure, clock_skew, drift_alarm, approv
 outbox_dead`. MEDIUM: `position_opened, position_closed, promotion, demotion, gauntlet_pass, data_quality,
 fill_divergence`. INFO: `heartbeat, experiment_done, operator_note, fill, intent_rejected, feed_up, kill_reset,
 state_checkpoint, config_loaded, data_pulled, day_rollover`.
+
+## Komutlar (M2–M4)
+
+| Komut | `data` |
+|---|---|
+| `strategies list` | `[{name, instrument, hash, tags, stage, last_experiment}]` |
+| `strategies show <ad>` | `{file, genome, hash, last_experiment, report_md}` |
+| `experiments summary` | `{summary: {trials, passed, by_source, failed_gate_histogram, lessons, holdout_accesses}, recent}` |
+| `gauntlet run <ad\|yol>` (Arman) | `{experiment, file, report, similar_dead_ideas}` |
+| `report daily\|weekly` | `{kind, since, events, by_kind, high, new_trials, new_passed, total_trials, stages, pending_approvals, kills}` |
+| `strategy pause\|demote\|resume <ad\|hash> <gerekçe>` | `{strategy, hash, stage, seq}` |
+| `budget` | `{llm: {provider, model, daily_usd, spent_today_usd, enabled, ...}, data, search}` |
+| `approvals list` / `show <id>` | `{pending, total}` / `{id, kind, subject, payload, created_ts, decision}` |
+| `approve <id> [--reject]` (Arman) | onay kaydı |
+| `daemon run [--replay-days N] [--max-ticks N]` (Arman/systemd) | `DaemonSummary` |
+| `verify m1..m4` | `{milestone, green, passed, total, checks: [{name, pass, detail}]}` |
+
+Strateji adı yalnız `[A-Za-z0-9_-]` (≤64); dosya yolu yalnız Arman'ın `gauntlet run|eval` komutlarında.
+

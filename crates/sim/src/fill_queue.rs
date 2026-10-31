@@ -525,6 +525,7 @@ mod tests {
     /// limitler yalnız içinden geçişle dolar → `TradeFill` (TradeThrough) ile birebir aynı işlemler.
     /// Kotasyonlu akışta koşu hatasız ve deterministik.
     #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
     fn engine_end_to_end() {
         use crate::engine::SimConfig;
         use crate::synthetic::random_walk_trades;
@@ -541,7 +542,7 @@ mod tests {
             NANOS_PER_SEC,
             Price(100_000),
         );
-        let run = |m: &dyn FillModel, evs: &[MarketEvent]| {
+        let run = |m: std::sync::Arc<dyn FillModel>, evs: &[MarketEvent]| {
             let mut st: Vec<Box<dyn Strategy>> = vec![Box::new(RandomEntry::new(
                 7,
                 I,
@@ -552,8 +553,8 @@ mod tests {
             ))];
             run_sim(&env, m, SimConfig::default(), evs.to_vec(), &mut st).expect("koşu")
         };
-        let q = run(&MboQueueFill::default(), &evs);
-        let t = run(&TradeFill::default(), &evs);
+        let q = run(std::sync::Arc::new(MboQueueFill::default()), &evs);
+        let t = run(std::sync::Arc::new(TradeFill::default()), &evs);
         assert!(!q.trades.is_empty());
         assert_eq!(q.trades, t.trades);
         assert_eq!(q.fill_model, "queue@v1");
@@ -565,8 +566,8 @@ mod tests {
             }
             with_quotes.push(e.clone());
         }
-        let a = run(&MboQueueFill::default(), &with_quotes);
-        let b = run(&MboQueueFill::default(), &with_quotes);
+        let a = run(std::sync::Arc::new(MboQueueFill::default()), &with_quotes);
+        let b = run(std::sync::Arc::new(MboQueueFill::default()), &with_quotes);
         assert!(!a.trades.is_empty());
         assert_eq!(a, b);
     }

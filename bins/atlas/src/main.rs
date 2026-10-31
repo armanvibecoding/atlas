@@ -5,6 +5,7 @@ mod daemon;
 mod home;
 mod m2;
 mod m3;
+mod m4;
 mod verify;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -23,7 +24,7 @@ pub const SCHEMA: &str = "atlas.cli/1";
 
 #[derive(Parser)]
 #[command(name = "atlas", version, about = "Atlas araştırma ve işlem platformu")]
-struct Cli {
+pub struct Cli {
     /// Makine-okunur çıktı (docs/cli-schema.md).
     #[arg(long, global = true)]
     json: bool,
@@ -93,8 +94,8 @@ enum Cmd {
     },
     /// Raporcu çıktısı + metrikler.
     Report {
-        /// daily | weekly
-        kind: String,
+        #[command(subcommand)]
+        kind: ReportKind,
     },
     /// Strateji yaşam döngüsü (yalnız kısıtlayıcı eylemler).
     Strategy {
@@ -134,6 +135,14 @@ enum DaemonCmd {
         #[arg(long)]
         max_ticks: Option<u64>,
     },
+}
+
+#[derive(Subcommand)]
+enum ReportKind {
+    /// Son 24 saat.
+    Daily,
+    /// Son 7 gün.
+    Weekly,
 }
 
 #[derive(Subcommand)]
@@ -355,6 +364,7 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
         Cmd::Verify { milestone, fake_n } => match milestone.as_str() {
             "m2" => m2::verify_m2(&h, out, fake_n),
             "m3" => m3::verify_m3(&h, out, 3),
+            "m4" => m4::verify_m4(&h, out),
             "m1" => verify::m1(&h, out),
             other => bail!("{other}: henüz tanımlı değil (M1 aşamasındayız)"),
         },
@@ -367,7 +377,14 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
                     max_ticks,
                 },
         } => m3::daemon_run(&h, out, replay_days, max_ticks),
-        Cmd::Report { kind } => m3::report(&h, out, &kind),
+        Cmd::Report { kind } => m3::report(
+            &h,
+            out,
+            match kind {
+                ReportKind::Daily => "daily",
+                ReportKind::Weekly => "weekly",
+            },
+        ),
         Cmd::Strategy { action, id, reason } => {
             m3::strategy(&h, out, &action, &id, &reason.join(" "))
         }

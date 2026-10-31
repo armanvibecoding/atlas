@@ -186,6 +186,10 @@ pub const EXCLUDED: &[(&str, &str)] = &[
         "verify",
         "yazma + ağır: journal'a sonuç olayı yazar, dakikalar sürer",
     ),
+    (
+        "daemon run",
+        "yazma + süreç: sürekli çalışan daemon, yalnız Arman/systemd",
+    ),
     ("help", "clap yardım metni, veri değil"),
 ];
 
@@ -223,9 +227,10 @@ pub fn validate_ident(s: &str) -> Result<(), String> {
     }
     if !s
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
     {
-        return Err("ad yalnız [A-Za-z0-9._:-] içerebilir".into());
+        // '.' ve ':' yok: CLI'da ad asla dosya yolu olarak yorumlanmasın (yol geçişi).
+        return Err("ad yalnız [A-Za-z0-9_-] içerebilir".into());
     }
     if s.starts_with('-') || s.starts_with('.') {
         return Err("ad '-' ya da '.' ile başlayamaz".into());
@@ -389,8 +394,12 @@ mod tests {
 
     #[test]
     fn ident_kabul() {
-        for ok in ["trend_pullback", "a", "strategy:X-1", "ap.42", "A9_b-c:d.e"] {
+        for ok in ["trend_pullback", "a", "X-1", "42", "A9_b-c"] {
             assert!(validate_ident(ok).is_ok(), "{ok}");
+        }
+        // '.' ve ':' yok: CLI'da ad dosya yolu olarak yorumlanamaz.
+        for bad in ["Cargo.toml", "a:b", "x.toml", "../x"] {
+            assert!(validate_ident(bad).is_err(), "{bad}");
         }
     }
 
@@ -475,8 +484,8 @@ mod tests {
         assert_eq!(a, ["--json", "journal", "replay"]);
         let (_, a) = resolve("strategies/show/trend_pullback", &[]).unwrap();
         assert_eq!(a, ["--json", "strategies", "show", "trend_pullback"]);
-        let (_, a) = resolve("approvals/show/ap:1", &[]).unwrap();
-        assert_eq!(a, ["--json", "approvals", "show", "ap:1"]);
+        let (_, a) = resolve("approvals/show/1", &[]).unwrap();
+        assert_eq!(a, ["--json", "approvals", "show", "1"]);
     }
 
     #[test]

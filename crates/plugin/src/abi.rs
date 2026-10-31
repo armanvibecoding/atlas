@@ -182,14 +182,23 @@ pub fn parse_output(
         let reference = input.bars.last().ok_or(OutputError::NoReference)?.close;
         let sg = i64::from(side.sign());
         // Alışta stop referansın altında, hedef üstünde; satışta tersi.
-        if (reference - stop_loss).saturating_mul(sg) <= 0 {
+        // Doğrudan karşılaştırma: taşmaya açık çıkarma yok (güvenilmez girdi, kural 9).
+        let _ = sg;
+        let stop_ok = match side {
+            atlas_core::Side::Buy => stop_loss < reference,
+            atlas_core::Side::Sell => stop_loss > reference,
+        };
+        if !stop_ok {
             return Err(OutputError::StopSide {
                 stop: stop_loss,
                 reference,
             });
         }
         if let Some(t) = take_profit
-            && (t - reference).saturating_mul(sg) <= 0
+            && !match side {
+                atlas_core::Side::Buy => t > reference,
+                atlas_core::Side::Sell => t < reference,
+            }
         {
             return Err(OutputError::TargetSide {
                 target: t,

@@ -9,12 +9,41 @@ use wasmtime::{
 /// wasm yığın üst sınırı (derin özyineleme tuzağa düşer, host yığını taşmaz).
 const MAX_WASM_STACK: usize = 512 << 10;
 
-/// Deterministik, kesmesiz, yakıt sayan motor.
+/// Duvar saati yedeği: epoch her 10 ms artar; bir çağrı bu kadar tick'i aşarsa tuzağa düşer.
+/// Yakıt toplu bellek komutlarını (memory.fill/copy) boyutla orantılı saymaz; bu yedek, yakıtla
+/// sınırlanamayan CPU tüketimini keser. Normal koşuda asla tetiklenmez → sonuçlar deterministik kalır.
+pub const EPOCH_TICK_MS: u64 = 10;
+pub const EPOCH_DEADLINE_TICKS: u64 = 200;
+
+static ENGINE: std::sync::OnceLock<Result<Engine, String>> = std::sync::OnceLock::new();
+
+/// Tüm plugin'lerin paylaştığı tek motor + tek epoch saati iş parçacığı.
 fn engine() -> Result<Engine, PluginError> {
+    ENGINE
+        .get_or_init(|| {
+            let e = build_engine().map_err(|e| e.to_string())?;
+            let ticker = e.clone();
+            std::thread::Builder::new()
+                .name("atlas-plugin-epoch".into())
+                .spawn(move || {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(EPOCH_TICK_MS));
+                        ticker.increment_epoch();
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(e)
+        })
+        .clone()
+        .map_err(PluginError::Engine)
+}
+
+/// Deterministik, yakıt sayan motor (+ yalnız ölümcül duvar saati yedeği).
+fn build_engine() -> Result<Engine, PluginError> {
     let mut c = Config::new();
-    // Sonsuz döngü → yakıt biter → tuzak. Zaman tabanlı kesme yok (determinizm).
+    // Sonsuz döngü → yakıt biter → tuzak.
     c.consume_fuel(true);
-    c.epoch_interruption(false);
+    c.epoch_interruption(true);
     // Platformdan bağımsız NaN bit desenleri.
     c.cranelift_nan_canonicalization(true);
     // Sonucu donanıma bağlı olabilen öneriler kapalı.
@@ -117,6 +146,7 @@ fn instantiate(m: &PluginModule, l: &PluginLimits) -> Result<Live, PluginError> 
         .build();
     let mut store = Store::new(&m.engine, HostState { limits });
     store.limiter(|s| &mut s.limits);
+    store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
     // `start` fonksiyonu da yakıtla sınırlıdır.
     store
         .set_fuel(l.fuel_per_event)
@@ -207,6 +237,7 @@ fn run(live: &mut Live, input: &[u8], l: &PluginLimits) -> Result<Vec<u8>, CallE
     live.store
         .set_fuel(l.fuel_per_event)
         .map_err(|e| CallError::Trap(e.to_string()))?;
+    live.store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
     let ptr = live
         .alloc
         .call(&mut live.store, len)

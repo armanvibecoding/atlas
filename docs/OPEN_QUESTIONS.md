@@ -85,3 +85,32 @@ vade, (b) limit emir (maker %0.02) girişlerini öncelemeli. Sahte strateji test
 ### 16. Spec sapması: performans ölçümü
 Spec "2 yıl NQ 1m < 200 ms" diyor; NQ verisi yok (M0). Ölçüm BTCUSDT 921 bin barda yapıldı (~215 ms) ve NQ 2 yıl
 bar sayısına (≈717 bin) oranlandı (~167 ms). NQ verisi gelince doğrudan ölçülecek.
+
+## M3–M4'te eklenenler
+
+### 17. LLM ajanları — **karar bekliyor**
+Sağlayıcı (Anthropic / xAI), model, 1M token fiyatı ve günlük USD tavanı `atlas.toml [agents]`'a; anahtar
+`/etc/atlas/atlas.env`'e. Doldurulmadan hiçbir çağrı yapılmaz (şu an kapalı).
+
+### 18. VPS — **engel: devir**
+§7.1: `verify m1..m4` VPS'te, 7 günlük kesintisiz gölge+paper koşusu, Grok'un SSH erişimi. `deploy/install.sh` hazır
+(Debian/Ubuntu). Önceki Hetzner VPS (mt5-bot) kaldırıldı; yeni sunucu ya da paper-challenge sunucusu?
+
+### 19. Grok webhook adresi — **engel: devir**
+`atlas.toml [webhook] url`. Boşken olaylar diskte bekler (kaybolmaz); `health` uyarır. Biçim: GROK_OPS.md §3.
+
+### 20. Onay anahtarı
+`atlas approve` için Arman'ın gizli anahtarının SHA-256'sı `atlas.toml [approvals] key_sha256`'ya; anahtar yalnız
+Arman'da (`ATLAS_APPROVER_KEY`). Boşken onay komutu kapalı.
+
+### 21. Devir onayı (`approve handoff`)
+Spec `atlas approve handoff` diyor; CLI'da onaylar sayısal talep kimliğiyle. Devir koşulları sağlanınca daemon
+`handoff` türünde talep açacak şekilde bağlanacak (küçük iş; VPS koşusuyla birlikte).
+
+### 22. Gerçek dolumla kalibrasyon
+M4 kalibrasyon kabulü sentetik gözlemle geçti. Gerçek paper/canlı dolum ancak gerçek borsa executor'ıyla (M5) gelir.
+
+### 23. ML ve plugin henüz aramaya bağlı değil
+Altyapı ve testler hazır; arama döngüsü şimdilik genomları kullanıyor. Meta-model sarmalı bir aday yine gauntlet'ten
+geçmeli (sicile yazılır).
+

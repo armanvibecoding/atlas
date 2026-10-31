@@ -356,6 +356,8 @@ impl Engine {
             return self.run_strategies(ev, strategies);
         }
 
+        // Durumlu dolum modelleri (kuyruk) her olayı görür (kotasyon/işlem akışı).
+        self.model.observe(ev);
         self.expire_entries(ev.ts);
         if self.model.handles(&ev.payload) {
             self.match_event(ev, slip)?;
@@ -380,6 +382,7 @@ impl Engine {
             .collect();
         for id in expired {
             if let Some(o) = self.orders.remove(&id) {
+                self.model.order_closed(id);
                 self.entry_meta.remove(&id);
                 self.state.cancel_pending(&o.strategy, o.instrument);
             }
@@ -568,6 +571,7 @@ impl Engine {
                 .collect();
             for id in siblings {
                 self.orders.remove(&id);
+                self.model.order_closed(id);
             }
             self.time_exit.remove(&key);
             let rec = self.open.remove(&key).ok_or_else(|| {
@@ -629,6 +633,7 @@ impl Engine {
             .collect();
         for id in ids {
             self.orders.remove(&id);
+            self.model.order_closed(id);
             self.entry_meta.remove(&id);
         }
         self.state.cancel_pending(&key.0, key.1);
