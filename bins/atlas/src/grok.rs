@@ -142,7 +142,9 @@ impl GrokDesk {
         };
         for (i, e) in new_events.iter().enumerate() {
             let mut orders = self.applied.remove(&e.ts.0).unwrap_or_default();
-            if Some(i) == first_bar && *wanted_kills != self.account.kills() {
+            // Yalnız kapsamlar karşılaştırılır: hesabın kendi kill'inin sebep metni journal'dakinden farklıdır
+            // (strategy:grok öneki); metin karşılaştırılsaydı her tick yeni SyncKills yazılırdı.
+            if Some(i) == first_bar && !wanted_kills.keys().eq(self.account.kills().keys()) {
                 let o = QueuedOrder {
                     request_seq: 0,
                     order: ManualOrder::SyncKills {
@@ -637,5 +639,42 @@ mod tests {
             snap["orders"],
             live.account.snapshot(UnixNanos(1))["orders"]
         );
+
+        // Sebep metni farklı ama kapsam aynıysa yeni eşitleme kaydı yazılmaz (journal şişmez).
+        let mut quiet = rebuilt;
+        let same_scope: BTreeMap<String, String> =
+            [("global".to_string(), "journal metni".to_string())].into();
+        let b0 = bars[bars.len() - 1];
+        let next = |k: u64| {
+            MarketEvent::bar(
+                inst.id,
+                atlas_core::Bar {
+                    open_ts: b0.close_ts.plus((k - 1) * NANOS_PER_MIN),
+                    close_ts: b0.close_ts.plus(k * NANOS_PER_MIN),
+                    ..b0
+                },
+            )
+        };
+        let syncs = |evs: &[Event]| {
+            evs.iter()
+                .filter(|e| e.kind == EventKind::GrokOrderApplied)
+                .count()
+        };
+        let first = quiet
+            .step_tick(&j, &[next(1)], b0.close_ts, &same_scope)
+            .unwrap();
+        assert_eq!(syncs(&first), 1, "kapsam değişti → bir kayıt");
+        // Hesabın kendi kill kaydı farklı metinle (ör. günlük zarar) — kapsam aynı.
+        quiet.account.apply_kills(&BTreeMap::new(), b0.close_ts);
+        quiet.account.apply_kills(
+            &[("global".to_string(), "hesabın kendi metni".to_string())].into(),
+            b0.close_ts,
+        );
+        for k in 2..6 {
+            let evs = quiet
+                .step_tick(&j, &[next(k)], b0.close_ts, &same_scope)
+                .unwrap();
+            assert_eq!(syncs(&evs), 0, "aynı kapsam → yeni kayıt yok (tick {k})");
+        }
     }
 }
