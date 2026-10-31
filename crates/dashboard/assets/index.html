@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas Paneli</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Atlas</h1>
+    <span class="sub">salt-okunur panel · veri: <code>atlas --json</code></span>
+  </div>
+  <div class="controls">
+    <span id="updated" class="muted">yükleniyor…</span>
+    <label class="chk"><input type="checkbox" id="auto" checked> otomatik yenile (15 sn)</label>
+    <button type="button" id="refresh">Yenile</button>
+    <select id="theme" aria-label="Tema">
+      <option value="auto">Tema: sistem</option>
+      <option value="light">Tema: açık</option>
+      <option value="dark">Tema: koyu</option>
+    </select>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="card" id="c-durum">
+    <h2>Durum</h2>
+    <div class="body" id="durum"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card" id="c-saglik">
+    <h2>Sağlık</h2>
+    <div class="body" id="saglik"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card wide" id="c-olaylar">
+    <h2>Olay akışı</h2>
+    <div class="filters">
+      <label>Öncelik
+        <select id="ev-prio">
+          <option value="">tümü</option>
+          <option value="high">yalnız HIGH</option>
+          <option value="medium">MEDIUM ve üstü</option>
+          <option value="info">INFO ve üstü</option>
+        </select>
+      </label>
+      <label>Tür <input id="ev-kind" placeholder="ör. kill_switch" maxlength="40" size="14"></label>
+      <label>Göster
+        <select id="ev-limit">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select>
+      </label>
+    </div>
+    <div class="body" id="olaylar"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card wide" id="c-stratejiler">
+    <h2>Stratejiler ve son gauntlet</h2>
+    <div class="body" id="stratejiler"><p class="muted">yükleniyor…</p></div>
+    <div class="body" id="strateji-detay" hidden></div>
+  </section>
+
+  <section class="card" id="c-sicil">
+    <h2>Deney sicili</h2>
+    <div class="body" id="sicil"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card" id="c-journal">
+    <h2>Journal tutarlılığı</h2>
+    <div class="body" id="journal"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card wide" id="c-veri">
+    <h2>Veri setleri</h2>
+    <div class="body" id="veri"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card wide" id="c-m3">
+    <h2>Raporlar, bütçe, onaylar</h2>
+    <div class="body sub-grid" id="m3"><p class="muted">yükleniyor…</p></div>
+  </section>
+
+  <section class="card wide" id="c-ham">
+    <h2>Tüm komutlar (ham JSON)</h2>
+    <p class="muted small">Beyaz listedeki her salt-okunur CLI komutunun çıktısı aynen. Yazma komutları burada yoktur.</p>
+    <div class="filters">
+      <label>Komut <select id="raw-cmd"></select></label>
+      <label id="raw-param-l" hidden>Ad/kimlik <input id="raw-param" maxlength="64" size="18"></label>
+      <label id="raw-query-l" hidden>Sorgu <input id="raw-query" placeholder="prio=high&amp;limit=20" size="24"></label>
+      <button type="button" id="raw-go">Getir</button>
+    </div>
+    <div class="body"><pre id="raw-out" class="raw muted">—</pre></div>
+  </section>
+</main>
+<footer class="muted small">Kimlik doğrulama yok: panel yalnız 127.0.0.1'de dinler. VPS'te SSH tüneliyle erişin.</footer>
+</body>
+</html>
