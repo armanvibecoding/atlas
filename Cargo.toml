@@ -17,8 +17,11 @@ members = [
     "crates/agents",
     "crates/ml",
     "crates/dashboard",
+    "crates/plugin",
     "bins/atlas",
 ]
+# WASM eklenti kaynakları ayrı crate'lerdir (wasm32 hedefi); workspace üyesi değildir.
+exclude = ["plugins"]
 
 [workspace.package]
 version = "0.1.0"
@@ -42,6 +45,7 @@ atlas-exec = { path = "crates/exec" }
 atlas-search = { path = "crates/search" }
 atlas-agents = { path = "crates/agents" }
 atlas-ml = { path = "crates/ml" }
+atlas-plugin = { path = "crates/plugin" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -66,6 +70,8 @@ tempfile = "3"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "query", "json"] }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "process", "time", "sync", "signal"] }
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
+# Plugin sandbox (ADR 0004): yalnız derleyici + çalışma zamanı + WAT. WASI, async, GC, bileşen modeli yok.
+wasmtime = { version = "50.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

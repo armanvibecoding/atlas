@@ -1,0 +1,21 @@
+[package]
+name = "atlas-plugin"
+description = "WASM strateji eklentileri: wasmtime sandbox'ı (yakıt + bellek limiti, WASI yok) ve PluginStrategy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_plugin"
+
+[dependencies]
+atlas-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+wasmtime.workspace = true
+
+[lints]
+workspace = true
