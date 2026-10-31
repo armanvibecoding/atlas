@@ -1,8 +1,10 @@
 //! `atlas` — tek CLI (§6). Grok Bot'un sisteme tek arayüzü; her komut `--json` destekler.
 //! Çıktı şeması: docs/cli-schema.md (`atlas.cli/1`).
 
+mod daemon;
 mod home;
 mod m2;
+mod m3;
 mod verify;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -84,12 +86,60 @@ enum Cmd {
         #[command(subcommand)]
         cmd: DataCmd,
     },
+    /// Sürekli çalışan daemon (yalnız Arman / systemd).
+    Daemon {
+        #[command(subcommand)]
+        cmd: DaemonCmd,
+    },
+    /// Raporcu çıktısı + metrikler.
+    Report {
+        /// daily | weekly
+        kind: String,
+    },
+    /// Strateji yaşam döngüsü (yalnız kısıtlayıcı eylemler).
+    Strategy {
+        /// pause | demote | resume
+        action: String,
+        /// Ad ya da genom hash öneki.
+        id: String,
+        reason: Vec<String>,
+    },
+    /// LLM / veri / arama bütçesi.
+    Budget,
+    /// Onay talepleri.
+    Approvals {
+        #[command(subcommand)]
+        cmd: ApprovalsCmd,
+    },
+    /// Onay (yalnız Arman; ATLAS_APPROVER_KEY).
+    Approve {
+        id: i64,
+        #[arg(long)]
+        reject: bool,
+    },
     /// Kill switch tetikle: global | account | strategy:<id>.
     Kill { scope: String, reason: Vec<String> },
     /// Kill switch'i aç (yalnız Arman).
     KillReset { scope: String },
     /// Journal'a operatör notu (metin argümanda ya da stdin'de).
     Note { text: Vec<String> },
+}
+
+#[derive(Subcommand)]
+enum DaemonCmd {
+    Run {
+        /// Hızlandırılmış: in-sample'ın son N gününü sanal saatle oynat.
+        #[arg(long)]
+        replay_days: Option<u64>,
+        #[arg(long)]
+        max_ticks: Option<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ApprovalsCmd {
+    List,
+    Show { id: i64 },
 }
 
 #[derive(Subcommand)]
@@ -190,6 +240,8 @@ fn guard_role(cmd: &Cmd) -> Result<()> {
                 cmd: JournalCmd::Checkpoint,
             } => Some("journal checkpoint"),
             Cmd::Gauntlet { .. } => Some("gauntlet (holdout bütçesi ve deneme sayacı tüketir)"),
+            Cmd::Approve { .. } => Some("approve (yalnız Arman)"),
+            Cmd::Daemon { .. } => Some("daemon"),
             _ => None,
         };
         if let Some(f) = forbidden {
@@ -302,11 +354,29 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
         } => m2::experiments_summary(&h, out),
         Cmd::Verify { milestone, fake_n } => match milestone.as_str() {
             "m2" => m2::verify_m2(&h, out, fake_n),
+            "m3" => m3::verify_m3(&h, out, 3),
             "m1" => verify::m1(&h, out),
             other => bail!("{other}: henüz tanımlı değil (M1 aşamasındayız)"),
         },
         Cmd::Journal { cmd } => journal(&h, out, cmd),
         Cmd::Data { cmd } => data(&h, out, cmd),
+        Cmd::Daemon {
+            cmd:
+                DaemonCmd::Run {
+                    replay_days,
+                    max_ticks,
+                },
+        } => m3::daemon_run(&h, out, replay_days, max_ticks),
+        Cmd::Report { kind } => m3::report(&h, out, &kind),
+        Cmd::Strategy { action, id, reason } => {
+            m3::strategy(&h, out, &action, &id, &reason.join(" "))
+        }
+        Cmd::Budget => m3::budget(&h, out),
+        Cmd::Approvals { cmd } => match cmd {
+            ApprovalsCmd::List => m3::approvals(&h, out, None),
+            ApprovalsCmd::Show { id } => m3::approvals(&h, out, Some(id)),
+        },
+        Cmd::Approve { id, reject } => m3::approve(&h, out, id, reject),
         Cmd::Kill { scope, reason } => kill(&h, out, &scope, &reason.join(" ")),
         Cmd::KillReset { scope } => kill_reset(&h, out, &scope),
         Cmd::Note { text } => note(&h, out, text),

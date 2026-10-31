@@ -10,6 +10,11 @@ members = [
     "crates/genome",
     "crates/registry",
     "crates/gauntlet",
+    "crates/ops",
+    "crates/portfolio",
+    "crates/exec",
+    "crates/search",
+    "crates/agents",
     "bins/atlas",
 ]
 
@@ -29,6 +34,11 @@ atlas-features = { path = "crates/features" }
 atlas-genome = { path = "crates/genome" }
 atlas-registry = { path = "crates/registry" }
 atlas-gauntlet = { path = "crates/gauntlet" }
+atlas-ops = { path = "crates/ops" }
+atlas-portfolio = { path = "crates/portfolio" }
+atlas-exec = { path = "crates/exec" }
+atlas-search = { path = "crates/search" }
+atlas-agents = { path = "crates/agents" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

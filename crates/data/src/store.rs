@@ -345,6 +345,61 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Canlı akıştan gelen barları ay dosyalarına birleştirir (aynı `open_ts` → yeni bar kazanır;
+    /// geçmiş barlar korunur). Dönen: güncellenen ay girdileri.
+    pub fn append_bars(
+        &self,
+        source: &str,
+        symbol: &str,
+        tick_size: Fixed9,
+        lot_size: Fixed9,
+        bars: &[Bar],
+        pulled_at: &str,
+    ) -> Result<Vec<ManifestEntry>, StoreError> {
+        use chrono::Datelike;
+        let mut by_month: BTreeMap<String, Vec<Bar>> = BTreeMap::new();
+        for b in bars {
+            let d = atlas_core::calendar::to_utc(b.open_ts).date_naive();
+            by_month
+                .entry(format!("{:04}-{:02}", d.year(), d.month()))
+                .or_default()
+                .push(*b);
+        }
+        let mut out = Vec::new();
+        for (month, new) in by_month {
+            let rel = Self::rel_path(source, symbol, "ohlcv_1m", &month);
+            let path = self.root.join(&rel);
+            let mut merged: BTreeMap<UnixNanos, Bar> = BTreeMap::new();
+            if path.exists() {
+                let (_, old, _) = read_bar_file(&path)?;
+                for b in old {
+                    merged.insert(b.open_ts, b);
+                }
+            }
+            for b in new {
+                merged.insert(b.open_ts, b);
+            }
+            let all: Vec<Bar> = merged.into_values().collect();
+            let header = FileHeader {
+                schema: "ohlcv_1m".into(),
+                source: source.into(),
+                symbol: symbol.into(),
+                tick_size,
+                lot_size,
+                interval_ns: atlas_core::units::NANOS_PER_MIN,
+                month,
+                count: all.len() as u64,
+                first_ts: all.first().map_or(UnixNanos::ZERO, |b| b.open_ts),
+                last_ts: all.last().map_or(UnixNanos::ZERO, |b| b.open_ts),
+                pulled_at: pulled_at.into(),
+            };
+            out.push(self.put_month(&header, &all, 0)?);
+        }
+        Ok(out)
+    }
+}
+
 /// Barları piyasa olaylarına çevirir (olay zamanı = bar kapanışı).
 pub fn bars_to_events(inst: InstrumentId, bars: &[Bar]) -> Vec<MarketEvent> {
     bars.iter().map(|b| MarketEvent::bar(inst, *b)).collect()
@@ -401,6 +456,20 @@ mod tests {
         changed[3].close = Price(1);
         let v3 = write_bar_file(&dir.path().join("c.atb"), &header(10, "t1"), &changed).unwrap();
         assert_ne!(v1, v3);
+    }
+
+    #[test]
+    fn append_merges_months() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::new(dir.path());
+        s.append_bars("t", "X", Fixed9(1), Fixed9(1), &bars()[..5], "a")
+            .unwrap();
+        s.append_bars("t", "X", Fixed9(1), Fixed9(1), &bars()[3..], "b")
+            .unwrap();
+        let (b, _) = s
+            .load_bars("t", "X", "ohlcv_1m", UnixNanos(0), UnixNanos(u64::MAX))
+            .unwrap();
+        assert_eq!(b, bars());
     }
 
     #[test]

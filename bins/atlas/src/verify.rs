@@ -56,7 +56,7 @@ fn journal_roundtrip(seed: u64) -> CheckOutcome {
             ))];
         let r = validation::run_sim(
             &env,
-            &atlas_sim::BarFill::default(),
+            std::sync::Arc::new(atlas_sim::BarFill::default()),
             Default::default(),
             bars,
             &mut strats,

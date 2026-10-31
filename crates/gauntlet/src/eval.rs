@@ -78,14 +78,14 @@ pub fn always_calendar() -> atlas_core::Calendar {
 }
 
 pub struct Evaluator<'a> {
-    pub gate: RiskGate,
+    pub gate: Arc<RiskGate>,
     pub store: &'a FeatureStore,
 }
 
 impl<'a> Evaluator<'a> {
     pub fn new(env: RiskEnv, store: &'a FeatureStore) -> Self {
         Evaluator {
-            gate: RiskGate::new(env),
+            gate: Arc::new(RiskGate::new(env)),
             store,
         }
     }
@@ -113,8 +113,12 @@ impl<'a> Evaluator<'a> {
             ..SimConfig::default()
         };
         let start = m.span().0;
-        let fill = BarFill::default();
-        let engine = Engine::new(&self.gate, &fill, cfg, start);
+        let engine = Engine::new(
+            Arc::clone(&self.gate),
+            Arc::new(BarFill::default()),
+            cfg,
+            start,
+        );
         let inst = m.instrument.id;
         let mut strats: Vec<Box<dyn Strategy>> = vec![Box::new(strat)];
         let res = engine.run(

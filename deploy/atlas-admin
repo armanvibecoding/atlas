@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# atlas-admin — Grok Bot'un SSH zorunlu komut sarmalayıcısı (§6).
+# authorized_keys:
+#   command="/usr/local/bin/atlas-admin",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... grok
+# Yalnız beyaz listedeki salt-okunur ya da KISITLAYICI komutlar çalışır. Risk artıran, terfi ettiren,
+# sermaye değiştiren hiçbir komut geçmez. CLI ayrıca ATLAS_ROLE=grok ile ikinci kez denetler.
+# Ret çıkış kodu: 126.
+set -euo pipefail
+
+ATLAS_BIN="${ATLAS_BIN:-/opt/atlas/bin/atlas}"
+export ATLAS_HOME="${ATLAS_ADMIN_HOME:-/opt/atlas}"
+export ATLAS_ROLE=grok
+
+deny() {
+  echo "izin yok: $1" >&2
+  logger -t atlas-admin "RED: $1 :: ${cmd:-}" 2>/dev/null || true
+  exit 126
+}
+
+cmd="${SSH_ORIGINAL_COMMAND:-${*:-}}"
+[[ -z "$cmd" ]] && deny "boş komut"
+[[ ${#cmd} -gt 4000 ]] && deny "komut çok uzun"
+# Kabuk metakarakterleri ve kontrol karakterleri reddedilir (komut asla kabukta yorumlanmaz).
+if [[ "$cmd" =~ [\;\&\|\`\$\<\>\(\)\{\}\\\*\?\!] ]] || [[ "$cmd" =~ [[:cntrl:]] ]]; then
+  deny "kabuk metakarakteri"
+fi
+
+read -r -a argv <<< "$cmd"
+if [[ "${argv[0]:-}" == "atlas" ]]; then argv=("${argv[@]:1}"); fi
+[[ ${#argv[@]} -eq 0 ]] && deny "boş komut"
+
+for a in "${argv[@]}"; do
+  case "$a" in
+    --home|--home=*) deny "--home yasak" ;;
+  esac
+done
+
+c0="${argv[0]}"; c1="${argv[1]:-}"
+case "$c0" in
+  status|health|events|experiments|budget|note|kill) ;;
+  verify)     [[ "$c1" =~ ^m[1-5]$ ]] || deny "verify m1..m5" ;;
+  report)     [[ "$c1" == "daily" || "$c1" == "weekly" ]] || deny "report daily|weekly" ;;
+  strategies) [[ "$c1" == "list" || "$c1" == "show" ]] || deny "strategies list|show" ;;
+  strategy)   [[ "$c1" == "pause" || "$c1" == "demote" || "$c1" == "resume" ]] || deny "strategy pause|demote|resume" ;;
+  approvals)  [[ "$c1" == "list" || "$c1" == "show" ]] || deny "approvals list|show" ;;
+  *) deny "beyaz listede değil: $c0" ;;
+esac
+if [[ "$c0" == "experiments" && "$c1" != "summary" ]]; then deny "experiments summary"; fi
+
+exec "$ATLAS_BIN" "${argv[@]}"

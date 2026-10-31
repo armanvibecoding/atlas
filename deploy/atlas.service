@@ -1,0 +1,47 @@
+# /etc/systemd/system/atlas.service — Atlas daemon (§7 M3)
+[Unit]
+Description=Atlas araştırma ve işlem daemon'u
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas
+Environment=ATLAS_HOME=/opt/atlas
+EnvironmentFile=/etc/atlas/atlas.env
+ExecStart=/opt/atlas/bin/atlas daemon run
+Restart=always
+RestartSec=10
+# Daemon her dakika WATCHDOG=1 gönderir; 5 dk sessizlik = yeniden başlat.
+WatchdogSec=300
+TimeoutStopSec=60
+
+# Kaynak limitleri
+MemoryMax=6G
+CPUQuota=300%
+LimitNOFILE=65536
+TasksMax=512
+
+# Sertleştirme
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/opt/atlas/var
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

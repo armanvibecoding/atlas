@@ -82,6 +82,15 @@ impl BinanceFutures {
         Err(BinanceError::Http(format!("{url}: {last}")))
     }
 
+    /// Borsa sunucu saati (saat kayması kontrolü için).
+    pub fn server_time(&self) -> Result<UnixNanos, BinanceError> {
+        let v = self.get_json(&format!("{}/fapi/v1/time", self.base))?;
+        v.get("serverTime")
+            .and_then(serde_json::Value::as_u64)
+            .map(UnixNanos::from_millis)
+            .ok_or_else(|| BinanceError::Parse("serverTime yok".into()))
+    }
+
     /// (tick boyutu, lot adımı) borsadan.
     pub fn filters(&self, symbol: &str) -> Result<(Fixed9, Fixed9), BinanceError> {
         let v = self.get_json(&format!("{}/fapi/v1/exchangeInfo", self.base))?;

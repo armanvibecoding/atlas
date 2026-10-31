@@ -1,0 +1,24 @@
+[package]
+name = "atlas-agents"
+description = "LLM ajanları: sağlayıcıdan bağımsız, bütçeli, şema doğrulamalı"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_agents"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-genome.workspace = true
+atlas-registry.workspace = true
+atlas-risk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+
+[lints]
+workspace = true

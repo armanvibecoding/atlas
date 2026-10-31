@@ -35,3 +35,51 @@ prop_pass_min = 0.50
 prop_bust_max = 0.20
 holdout_days = 90
 holdout_budget = 5
+
+# ---------------- M3 ----------------
+# Grok'un alarm webhook'u. Boşken olaylar diskte bekler (kaybolmaz); health uyarı verir.
+[webhook]
+url = ""
+
+# Uyandırma politikası (§5): sessiz saat 23:30–09:00 TSİ, saatte en fazla 6 uyandırma, gece özeti 09:00.
+[wake]
+tz = "Europe/Istanbul"
+quiet_from = "23:30"
+quiet_to = "09:00"
+max_wakes_per_hour = 6
+dedupe_minutes = 30
+digest_at = "09:00"
+
+# LLM ajanları. Sağlayıcı + fiyat + günlük bütçe dolmadan HİÇBİR çağrı yapılmaz (sistem mekanik çalışır).
+[agents]
+provider = "none"            # anthropic | xai | none
+model = ""                   # ör. claude-opus-5-5
+input_usd_per_mtok = ""      # ARMAN DOLDURUR — sağlayıcının güncel fiyatı
+output_usd_per_mtok = ""     # ARMAN DOLDURUR
+daily_usd = "0"              # ARMAN DOLDURUR — günlük tavan
+daily_tokens = 0
+research_every_minutes = 60
+hypotheses_per_cycle = 2
+
+[search]
+screen_days = 60
+min_screen_trades = 60
+screen_t_min = 2.0
+population = 40
+evals_per_cycle = 4
+risk_usd = 1000
+dead_idea_distance = 0.05
+
+[daemon]
+symbols = ["BTCUSDT"]
+heartbeat_minutes = 5
+search_every_minutes = 1
+persist_every_minutes = 60
+checkpoint_every_minutes = 60
+warmup_days = 3
+max_clock_skew_ms = 2000
+
+# Arman'ın onay anahtarının SHA-256'sı (hex). Boşsa `atlas approve` kapalı.
+# Üret: echo -n 'GİZLİ-ANAHTAR' | sha256sum ; anahtar ATLAS_APPROVER_KEY ortam değişkeninde (yalnız Arman'da).
+[approvals]
+key_sha256 = ""

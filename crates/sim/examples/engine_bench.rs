@@ -78,7 +78,14 @@ fn main() {
             h => vec![Box::new(Trader(StrategyId::new("t"), 0, h))],
         };
         let t = Instant::now();
-        let r = run_sim(&env, &BarFill::default(), cfg, evs.clone(), &mut s).unwrap();
+        let r = run_sim(
+            &env,
+            std::sync::Arc::new(BarFill::default()),
+            cfg,
+            evs.clone(),
+            &mut s,
+        )
+        .unwrap();
         println!(
             "{name}: {} olay, {:.0} ms",
             r.market_events,

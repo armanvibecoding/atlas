@@ -113,6 +113,11 @@ event_kinds! {
     DataPulled => "data_pulled", Info;
     DayRollover => "day_rollover", Info;
     Calibration => "calibration", Info;
+    ShadowSignal => "shadow_signal", Info;
+    AgentCall => "agent_call", Info;
+    AgentInvalidOutput => "agent_invalid_output", Info;
+    SearchCycle => "search_cycle", Info;
+    StageChange => "stage_change", Info;
 }
 
 impl fmt::Display for EventKind {

@@ -6,6 +6,8 @@
 //! - `lessons`: otopsi dersleri; yeni hipotezden önce yapısal benzerlik sorgusu.
 //! - Holdout erişimleri sayılır ve kaydedilir (kural 8).
 
+pub mod ladder;
+
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -143,7 +145,7 @@ pub struct ExperimentRow {
 }
 
 pub struct Registry {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 pub fn jaccard_distance(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f64 {
@@ -169,7 +171,11 @@ impl Registry {
 
     fn init(conn: Connection) -> Result<Registry> {
         conn.execute_batch(SCHEMA)?;
-        for t in ["experiments", "lessons", "holdouts", "holdout_access"] {
+        conn.execute_batch(ladder::LADDER_SCHEMA)?;
+        for t in ["experiments", "lessons", "holdouts", "holdout_access"]
+            .iter()
+            .chain(ladder::LADDER_TABLES.iter())
+        {
             conn.execute_batch(&append_only(t))?;
         }
         Ok(Registry { conn })

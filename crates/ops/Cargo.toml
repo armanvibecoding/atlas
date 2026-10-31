@@ -1,0 +1,26 @@
+[package]
+name = "atlas-ops"
+description = "Olay hunisi, outbox/webhook, uyandırma politikası, sessiz saatler, gece özeti"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_ops"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-journal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

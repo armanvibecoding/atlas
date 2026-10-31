@@ -23,6 +23,7 @@ use atlas_risk::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimConfig {
@@ -191,9 +192,11 @@ impl SessionView for SessionAdapter<'_> {
     }
 }
 
-pub struct Engine<'g> {
-    gate: &'g RiskGate,
-    model: &'g dyn FillModel,
+/// Motor, risk kapısını ve dolum modelini sahiplenir (`Arc`): uzun yaşayan paper/gölge koşucuları
+/// (daemon) ve kısa araştırma koşuları aynı tipi kullanır.
+pub struct Engine {
+    gate: Arc<RiskGate>,
+    model: Arc<dyn FillModel>,
     cfg: SimConfig,
     state: RiskState,
     history: MarketHistory,
@@ -210,16 +213,17 @@ pub struct Engine<'g> {
     result: SimResult,
 }
 
-impl<'g> Engine<'g> {
+impl Engine {
     pub fn new(
-        gate: &'g RiskGate,
-        model: &'g dyn FillModel,
+        gate: Arc<RiskGate>,
+        model: Arc<dyn FillModel>,
         cfg: SimConfig,
         start: UnixNanos,
     ) -> Self {
         let mut state = RiskState::new(&gate.env, start);
         state.quiet = !cfg.record_position_events;
         let start_balance = state.balance;
+        let fill_model = format!("{}@v{}", model.name(), model.version());
         Engine {
             gate,
             model,
@@ -237,7 +241,7 @@ impl<'g> Engine<'g> {
             rejection_events_stored: 0,
             ids: Vec::new(),
             result: SimResult {
-                fill_model: format!("{}@v{}", model.name(), model.version()),
+                fill_model,
                 start_balance,
                 final_balance: start_balance,
                 trades: Vec::new(),
@@ -255,16 +259,31 @@ impl<'g> Engine<'g> {
     }
 
     /// Haber zamanları vb. dış durumu ayarlamak için.
+    /// Biriken olayları alır (canlı koşucu her adımda boşaltır).
+    pub fn drain_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.result.events)
+    }
+
+    /// Şu ana kadar kapanmış işlemler.
+    pub fn trades(&self) -> &[TradeRecord] {
+        &self.result.trades
+    }
+
+    pub fn last_ts(&self) -> UnixNanos {
+        self.last_ts
+    }
+
     pub fn state_mut(&mut self) -> &mut RiskState {
         &mut self.state
     }
 
-    fn env(&self) -> &'g RiskEnv {
-        &self.gate.env
+    /// Ortamın paylaşılan kopyası (alan ödünçlerinden bağımsız).
+    fn gate(&self) -> Arc<RiskGate> {
+        Arc::clone(&self.gate)
     }
 
-    fn instrument(&self, id: InstrumentId) -> Result<&'g Instrument, SimError> {
-        self.env()
+    fn instrument(gate: &RiskGate, id: InstrumentId) -> Result<&Instrument, SimError> {
+        gate.env
             .instruments
             .by_id(id)
             .ok_or(SimError::UnknownInstrument(id))
@@ -275,7 +294,8 @@ impl<'g> Engine<'g> {
         if let Some(s) = self.cost_checked.get(&id) {
             return Ok(*s);
         }
-        let inst = self.instrument(id)?;
+        let gate = self.gate();
+        let inst = Self::instrument(&gate, id)?;
         let base = match self.cfg.slippage_override {
             Some(s) => s,
             None => inst
@@ -341,7 +361,9 @@ impl<'g> Engine<'g> {
             self.match_event(ev, slip)?;
         }
         if let Some(px) = ev.last_price() {
-            let evs = self.state.on_price(self.env(), ev.ts, ev.instrument, px);
+            let evs = self
+                .state
+                .on_price(&self.gate.env, ev.ts, ev.instrument, px);
             self.push_events(evs);
         }
         self.forced_exits(ev.ts);
@@ -450,7 +472,8 @@ impl<'g> Engine<'g> {
         let Some(o) = self.orders.remove(&t.order_id) else {
             return Ok(());
         };
-        let inst = self.instrument(o.instrument)?;
+        let gate = self.gate();
+        let inst = Self::instrument(&gate, o.instrument)?;
         let fee = inst
             .fee(t.price, Qty(o.qty))
             .map_err(|e| SimError::CostMissing(e.to_string()))?;
@@ -466,7 +489,7 @@ impl<'g> Engine<'g> {
             fee,
             reason: o.role.fill_reason(),
         };
-        let evs = self.state.on_fill(self.env(), &fill);
+        let evs = self.state.on_fill(&self.gate.env, &fill);
         self.push_events(evs);
         if self.cfg.record_position_events {
             self.result.fills.push(fill);
@@ -612,7 +635,8 @@ impl<'g> Engine<'g> {
     }
 
     fn forced_exits(&mut self, ts: UnixNanos) {
-        let env = self.env();
+        let gate = self.gate();
+        let env = &gate.env;
         let must_flat = env.must_be_flat(ts);
         let mut exits: Vec<(PosKey, FillReason)> = Vec::new();
         for key in self.state.positions().keys() {
@@ -651,7 +675,8 @@ impl<'g> Engine<'g> {
     ) -> Result<(), SimError> {
         let mut intents: Vec<Intent> = Vec::new();
         {
-            let env = self.env();
+            let gate = self.gate();
+            let env = &gate.env;
             let acct = AccountAdapter {
                 state: &self.state,
                 env,

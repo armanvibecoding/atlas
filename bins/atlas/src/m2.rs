@@ -30,14 +30,30 @@ pub fn gauntlet_cfg(h: &Home) -> Result<GauntletConfig> {
     GauntletConfig::from_atlas_toml(&h.atlas_toml_text).map_err(|e| anyhow!("atlas.toml: {e}"))
 }
 
-/// Genom dosyası: yol ya da `strategies/<ad>.toml`.
+/// Strateji adı → `strategies/<ad>.toml`. Ad yalnız `[A-Za-z0-9_-]` (yol/üst dizin yok).
 pub fn load_genome(h: &Home, s: &str) -> Result<(Genome, PathBuf)> {
-    let p = PathBuf::from(s);
-    let path = if p.exists() {
-        p
+    if s.is_empty()
+        || s.len() > 64
+        || !s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        bail!("geçersiz strateji adı {s:?}: yalnız [A-Za-z0-9_-]");
+    }
+    load_genome_file(&h.root.join("strategies").join(format!("{s}.toml")))
+}
+
+/// Açık dosya yolu (yalnız Arman'a açık `gauntlet run|eval`) ya da strateji adı.
+pub fn load_genome_path(h: &Home, s: &str) -> Result<(Genome, PathBuf)> {
+    if s.contains('/') || s.contains('\\') || s.ends_with(".toml") {
+        load_genome_file(&PathBuf::from(s))
     } else {
-        h.root.join("strategies").join(format!("{s}.toml"))
-    };
+        load_genome(h, s)
+    }
+}
+
+fn load_genome_file(path: &std::path::Path) -> Result<(Genome, PathBuf)> {
+    let path = path.to_path_buf();
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("{} okunamadı", path.display()))?;
     Ok((
@@ -88,7 +104,7 @@ pub fn load_market(h: &Home, symbol: &str, cfg: &GauntletConfig) -> Result<Loade
 
 pub fn gauntlet_run(h: &Home, out: &Out, genome: &str, source: &str) -> Result<bool> {
     let cfg = gauntlet_cfg(h)?;
-    let (g, path) = load_genome(h, genome)?;
+    let (g, path) = load_genome_path(h, genome)?;
     let prop = h.prop()?.map_err(|e| anyhow!("{e}"))?;
     let l = load_market(h, &g.instrument, &cfg)?;
     let store = FeatureStore::new();
@@ -139,7 +155,7 @@ pub fn gauntlet_eval(h: &Home, out: &Out, genome: &str, frictionless: bool) -> R
         Cost::BASE
     };
     let cfg = gauntlet_cfg(h)?;
-    let (g, _) = load_genome(h, genome)?;
+    let (g, _) = load_genome_path(h, genome)?;
     let l = load_market(h, &g.instrument, &cfg)?;
     let store = FeatureStore::new();
     let ev = Evaluator::new(l.env.clone(), &store);

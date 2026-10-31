@@ -256,14 +256,14 @@ impl Strategy for OneShot {
 
 pub fn run_sim(
     env: &RiskEnv,
-    model: &dyn FillModel,
+    model: std::sync::Arc<dyn FillModel>,
     cfg: SimConfig,
     events: Vec<MarketEvent>,
     strategies: &mut [Box<dyn Strategy + '_>],
 ) -> Result<SimResult, SimError> {
-    let gate = RiskGate::new(env.clone());
+    let gate = std::sync::Arc::new(RiskGate::new(env.clone()));
     let start = events.first().map_or(UnixNanos::ZERO, |e| e.ts);
-    let engine = Engine::new(&gate, model, cfg, start);
+    let engine = Engine::new(gate, model, cfg, start);
     engine.run(events, strategies)
 }
 
@@ -363,7 +363,13 @@ pub fn check_random_trade_fill(seed: u64) -> CheckOutcome {
         10,
         30 * NANOS_PER_MIN,
     ))];
-    match run_sim(&env, &model, SimConfig::default(), evs, &mut strats) {
+    match run_sim(
+        &env,
+        std::sync::Arc::new(model),
+        SimConfig::default(),
+        evs,
+        &mut strats,
+    ) {
         Ok(r) => random_verdict(name, &r),
         Err(e) => CheckOutcome::error(name, e),
     }
@@ -398,7 +404,13 @@ pub fn check_random_bar_fill(seed: u64) -> CheckOutcome {
         25,
         12 * 60 * NANOS_PER_MIN,
     ))];
-    match run_sim(&env, &model, SimConfig::default(), bars, &mut strats) {
+    match run_sim(
+        &env,
+        std::sync::Arc::new(model),
+        SimConfig::default(),
+        bars,
+        &mut strats,
+    ) {
         Ok(r) => random_verdict(name, &r),
         Err(e) => CheckOutcome::error(name, e),
     }
@@ -424,7 +436,13 @@ pub fn check_random_on_events(
         stop_ticks,
         8 * 60 * NANOS_PER_MIN,
     ))];
-    match run_sim(env, &model, SimConfig::default(), events, &mut strats) {
+    match run_sim(
+        env,
+        std::sync::Arc::new(model),
+        SimConfig::default(),
+        events,
+        &mut strats,
+    ) {
         Ok(r) => random_verdict(name, &r),
         Err(e) => CheckOutcome::error(name, e),
     }
@@ -465,7 +483,7 @@ pub fn check_buy_hold(events: Vec<MarketEvent>, env: &RiskEnv) -> CheckOutcome {
         _ => None,
     });
     let last_close = events.last().and_then(atlas_core::MarketEvent::last_price);
-    let res = match run_sim(env, &model, cfg, events, &mut strats) {
+    let res = match run_sim(env, std::sync::Arc::new(model), cfg, events, &mut strats) {
         Ok(r) => r,
         Err(e) => return CheckOutcome::error(name, e),
     };
@@ -525,7 +543,7 @@ fn scenario(bars: Vec<MarketEvent>) -> Result<SimResult, String> {
         target: Price(110),
         done: false,
     })];
-    run_sim(&env, &model, cfg, bars, &mut strats).map_err(|e| e.to_string())
+    run_sim(&env, std::sync::Arc::new(model), cfg, bars, &mut strats).map_err(|e| e.to_string())
 }
 
 /// Aynı mumda stop ve hedef → stop.
@@ -597,7 +615,14 @@ pub fn check_determinism(seed: u64) -> CheckOutcome {
             12,
             90 * NANOS_PER_MIN,
         ))];
-        run_sim(&env, &model, SimConfig::default(), bars, &mut strats).map(|r| r.hash())
+        run_sim(
+            &env,
+            std::sync::Arc::new(model),
+            SimConfig::default(),
+            bars,
+            &mut strats,
+        )
+        .map(|r| r.hash())
     };
     match (run(seed), run(seed), run(seed + 1)) {
         (Ok(a), Ok(b), Ok(c)) => CheckOutcome::new(
@@ -1002,7 +1027,14 @@ mod tests {
             3,
             30 * NANOS_PER_MIN,
         ))];
-        let r = run_sim(&env, &model, SimConfig::default(), evs, &mut strats).unwrap();
+        let r = run_sim(
+            &env,
+            std::sync::Arc::new(model),
+            SimConfig::default(),
+            evs,
+            &mut strats,
+        )
+        .unwrap();
         let st = random_stats(&r);
         assert!(st.p_value < RANDOM_TEST_ALPHA, "{st:?}");
         assert!(st.mean_frictionless_usd < 0.0);
@@ -1088,7 +1120,7 @@ algo_trading_allowed = true
         let mut strats: Vec<Box<dyn Strategy>> = vec![];
         let r = run_sim(
             &env,
-            &BarFill::default(),
+            std::sync::Arc::new(BarFill::default()),
             SimConfig::default(),
             vec![bar(2, 1, 1, 1, 1), bar(1, 1, 1, 1, 1)],
             &mut strats,
@@ -1118,7 +1150,7 @@ algo_trading_allowed = true
         })];
         let r = run_sim(
             &env,
-            &BarFill::default(),
+            std::sync::Arc::new(BarFill::default()),
             SimConfig {
                 slippage_override: Some(0),
                 ..SimConfig::default()
