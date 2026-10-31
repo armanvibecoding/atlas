@@ -1,0 +1,25 @@
+[package]
+name = "atlas-ml"
+description = "Meta-labeling: triple-barrier etiketleme, L2 lojistik regresyon, purged k-fold CV, MetaFiltered"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_ml"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-features.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+atlas-sim.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+
+[lints]
+workspace = true

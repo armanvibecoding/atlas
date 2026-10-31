@@ -15,6 +15,7 @@ members = [
     "crates/exec",
     "crates/search",
     "crates/agents",
+    "crates/ml",
     "bins/atlas",
 ]
 
@@ -39,6 +40,7 @@ atlas-portfolio = { path = "crates/portfolio" }
 atlas-exec = { path = "crates/exec" }
 atlas-search = { path = "crates/search" }
 atlas-agents = { path = "crates/agents" }
+atlas-ml = { path = "crates/ml" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
