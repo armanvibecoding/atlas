@@ -1,0 +1,23 @@
+[package]
+name = "example_momentum"
+description = "Örnek Atlas plugin'i: 20 barlık kanal kırılımı (momentum). ABI v1."
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Ayrı crate: Atlas workspace'inin üyesi değil (kök Cargo.toml `exclude = ["plugins"]`).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

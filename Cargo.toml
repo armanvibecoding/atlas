@@ -10,8 +10,11 @@ members = [
     "crates/genome",
     "crates/registry",
     "crates/gauntlet",
+    "crates/plugin",
     "bins/atlas",
 ]
+# WASM eklenti kaynakları ayrı crate'lerdir (wasm32 hedefi); workspace üyesi değildir.
+exclude = ["plugins"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,6 +32,7 @@ atlas-features = { path = "crates/features" }
 atlas-genome = { path = "crates/genome" }
 atlas-registry = { path = "crates/registry" }
 atlas-gauntlet = { path = "crates/gauntlet" }
+atlas-plugin = { path = "crates/plugin" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -49,6 +53,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 proptest = "1"
 tempfile = "3"
+# Plugin sandbox (ADR 0004): yalnız derleyici + çalışma zamanı + WAT. WASI, async, GC, bileşen modeli yok.
+wasmtime = { version = "50.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
