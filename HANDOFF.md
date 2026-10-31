@@ -13,7 +13,7 @@
 | M3 Otonomi | 72 sa insansız, deney üretir/eler, 0 outbox_dead, Grok izinleri | `verify m3` **5/5** (72 sa sanal saatle; gerçek VPS koşusu bekliyor) |
 | M4 Derinlik | kalibrasyon farkı küçülür, sandbox reddi, dashboard tam | `verify m4` **4/4** |
 
-233 test, clippy `-D warnings` temiz, GitHub CI yeşil. Repo: https://github.com/armanvibecoding/atlas
+239 test, clippy `-D warnings` temiz, GitHub CI yeşil. Repo: https://github.com/armanvibecoding/atlas
 
 ## 2. Devir koşulları (§7.1) — kalan
 
@@ -25,6 +25,13 @@
 | 4 | Webhook Grok'un alarm routine'ine bağlı, test olayı teslim | ✓ Grok'un uyandırma adresi + Bearer anahtarı `/etc/atlas/atlas.env`'de; `atlas webhook-test` teslim edildi (2026-10-31 22:46 UTC). MCP HTTPS (Let's Encrypt) dışarıdan 16 araç, token'sız 401 |
 | 5 | `GROK_OPS.md` güncel | ✓ |
 | 6 | `HANDOFF.md` | ✓ (bu belge) |
+
+## 2b. Grok'un sanal işlem hesabı (ADR 0010, Arman kararı 2026-11-01)
+
+Grok, sistemin stratejilerinden ayrı bir paper hesapta (`grok`, $100k, BTCUSDT) istediği gibi işlem açabilir:
+stop zorunlu, boyut Grok'ta; işlem başı $1000, günlük zarar, taban ve diğer prop limitleri risk kapısında aynen
+geçerli. Hesap kill olursa açmak yalnız Arman (`kill-reset`). Sistemin stratejilerine Grok hâlâ yalnız
+kısıtlayıcı eylem yapar. Grok hesabındaki işlemler 7 günlük denemenin kriterlerini etkilemez (ayrı hesap).
 
 ## 3. Canlıdaki stratejiler
 
