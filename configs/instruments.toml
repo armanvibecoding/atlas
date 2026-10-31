@@ -1,10 +1,20 @@
 # Enstrüman tanımları.
 # - tick_size / tick_value / lot_size: borsa kontrat spesifikasyonu. Binance değerleri her çekimde
 #   exchangeInfo ile otomatik doğrulanır (uyuşmazsa çekim durur).
-# - costs: UYDURULMAZ. Boş alan = doldurulmadı → bu enstrümanla simülasyon/RiskGate açık hata verir.
+# - costs: TEK YÖN (giriş veya çıkış), kontrat başına. Kaynaklar aşağıda; 2026-10-31'de internetten teyit.
 # - exposure_group / exposure_weight: net maruziyet ve ağırlıklı kontrat sayımı (mini=1, mikro=0.1).
+#
+# CME maliyet modeli (genel/perakende, belirli bir prop firması değil):
+#   commission_per_contract = aracı komisyonu + takas (clearing) ücreti
+#       NinjaTrader "Free" planı (resmi fiyat sayfası, 2026-07-01 tarifesi): standart $1.29, mikro $0.39
+#       + takas $0.19 (NinjaTrader'ın resmi maliyet örneği, 2026-08-14) → standart $1.48, mikro $0.58
+#   exchange_fee_per_contract = CME borsa ücreti (üye olmayan) + NFA $0.02
+#       NQ/MNQ: TradeStation ve Interactive Brokers ücret tabloları ($1.38 / $0.35)
+#       ES/MES/GC/MGC: Topstep ücret tablosu (2026; gidiş-dönüş $2.76/$0.70/$3.30/$1.40 → tek yön yarısı)
+#       CL: NexusFi 2026 başı tahmini ($1.42) — daha zayıf kaynak, ilk fırsatta CME Fee Finder'dan teyit
+# - slippage_ticks: kayma internetten teyit edilemez, ÖLÇÜLÜR (OPEN_QUESTIONS #6). Boşken sim hata verir.
 
-# ---- CME (kaynak: CME kontrat spesifikasyonları — teyit edilecek, OPEN_QUESTIONS #4) ----
+# ---- CME (tick değerleri: CME + birden çok aracı kurum sayfasıyla teyit, 2026-10-31) ----
 [[instrument]]
 symbol = "NQ"
 venue = "cme"
@@ -15,9 +25,9 @@ session = "cme_globex"
 exposure_group = "us_equity_tech"
 exposure_weight = "1"
 [instrument.costs]
-commission_per_contract_usd = ""    # ARMAN DOLDURUR — broker/firma ücreti
-exchange_fee_per_contract_usd = ""  # ARMAN DOLDURUR
-slippage_ticks = ""                 # kalibrasyonla ölçülecek (M4); şimdilik boş
+commission_per_contract_usd = "1.48"
+exchange_fee_per_contract_usd = "1.40"
+slippage_ticks = ""
 
 [[instrument]]
 symbol = "MNQ"
@@ -29,8 +39,8 @@ session = "cme_globex"
 exposure_group = "us_equity_tech"
 exposure_weight = "0.1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "0.58"
+exchange_fee_per_contract_usd = "0.37"
 slippage_ticks = ""
 
 [[instrument]]
@@ -43,8 +53,8 @@ session = "cme_globex"
 exposure_group = "us_equity_broad"
 exposure_weight = "1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "1.48"
+exchange_fee_per_contract_usd = "1.40"
 slippage_ticks = ""
 
 [[instrument]]
@@ -57,8 +67,8 @@ session = "cme_globex"
 exposure_group = "us_equity_broad"
 exposure_weight = "0.1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "0.58"
+exchange_fee_per_contract_usd = "0.37"
 slippage_ticks = ""
 
 [[instrument]]
@@ -71,8 +81,8 @@ session = "cme_globex"
 exposure_group = "gold"
 exposure_weight = "1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "1.48"
+exchange_fee_per_contract_usd = "1.67"
 slippage_ticks = ""
 
 [[instrument]]
@@ -85,8 +95,8 @@ session = "cme_globex"
 exposure_group = "gold"
 exposure_weight = "0.1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "0.58"
+exchange_fee_per_contract_usd = "0.72"
 slippage_ticks = ""
 
 [[instrument]]
@@ -99,12 +109,14 @@ session = "cme_globex"
 exposure_group = "crude"
 exposure_weight = "1"
 [instrument.costs]
-commission_per_contract_usd = ""
-exchange_fee_per_contract_usd = ""
+commission_per_contract_usd = "1.48"
+exchange_fee_per_contract_usd = "1.44"
 slippage_ticks = ""
 
 # ---- Binance USDⓈ-M perpetual (ücretsiz veri). 1 lot = lot_size kadar dayanak. ----
-# tick_value = tick_size × lot_size (BTC: 0.1 × 0.001 = 0.0001 USDT ≈ USD varsayımı, OPEN_QUESTIONS #5)
+# tick_value = tick_size × lot_size (BTC: 0.1 × 0.001 = 0.0001 USDT; 1 USDT = 1 USD kabul)
+# Ücret: normal kullanıcı (VIP 0) taker %0.05 / maker %0.02 — Binance resmi destek makalesi
+# 360033544231 ile teyit (2026-10-31). Karamsar olmak için tüm dolumlar taker sayılır.
 [[instrument]]
 symbol = "BTCUSDT"
 venue = "binance"
@@ -116,8 +128,8 @@ session = "always"
 exposure_group = "crypto_btc"
 exposure_weight = "0.001"
 [instrument.costs]
-fee_rate_percent = "0.05"  # Binance VIP0 taker (yayımlanmış tablo) — teyit: OPEN_QUESTIONS #5
-slippage_ticks = ""        # kalibrasyonla ölçülecek
+fee_rate_percent = "0.05"
+slippage_ticks = ""
 
 [[instrument]]
 symbol = "ETHUSDT"

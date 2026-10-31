@@ -17,10 +17,10 @@ max_usd_per_pull = ""
 seed = 20261031
 
 # Atlas'ın kendi risk politikası (firmadan bağımsız). Yalnız sıkılaştırılabilir.
-# DEĞERLER ÖNERİDİR — Arman onaylamalı (docs/OPEN_QUESTIONS.md #3). Gevşetme = insan onayı.
+# Arman onayı 2026-10-31 (işlem başı risk %1). Gevşetme = insan onayı.
 [risk]
 cooldown_after_stop_minutes = 15
-max_risk_per_trade_usd = "250"
+max_risk_per_trade_usd = "1000"   # Arman onayı 2026-10-31: hesabın %1'i (100k)
 max_group_net_contracts = "2"
 consistency_headroom = "0.8"
 drawdown_near = "0.25"

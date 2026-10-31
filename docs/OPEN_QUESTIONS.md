@@ -15,21 +15,21 @@ Son güncelleme: 2026-10-31 (M1).
 
 ## Onay bekleyen öneriler
 
-### 3. Atlas risk politikası (`configs/atlas.toml [risk]`)
-Firma kurallarından ayrı, bizim sıkılaştırmalarımız. Önerilen başlangıç:
-`cooldown 15 dk`, `işlem başı risk $250`, `grup net 2 kontrat`, `consistency tamponu %80`,
-`drawdown yakınlık uyarısı %25`, `stop kayma tamponu 2 tick`, `hafta kapanışından 60 dk önce giriş yok`.
-Çalışma anında yalnız sıkılaştırılabilir; gevşetme = senin onayın (§4.12).
+### 3. Atlas risk politikası — **KAPANDI (2026-10-31)**
+Arman: "%1 risk iyidir" → işlem başı en fazla $1.000 (100k'nın %1'i). Diğer öneriler itirazsız kabul:
+stop sonrası 15 dk aynı yöne giriş yok, grup net 2 kontrat, consistency tamponu %80, drawdown yakınlık
+uyarısı %25, stop kayma tamponu 2 tick, hafta kapanışından 60 dk önce yeni giriş yok.
 
-### 4. CME kontrat spesifikasyonları ve maliyetleri
-- Tick boyutu/değeri (NQ 0.25/$5, MNQ 0.25/$0.50, ES 0.25/$12.50, MES 0.25/$1.25, GC 0.10/$10,
-  MGC 0.10/$1, CL 0.01/$10) CME spesifikasyonundan; teyit et.
-- Komisyon ve borsa ücretleri **boş** (broker/firma bağımlı). Boşken bu enstrümanlarla simülasyon hata verir.
+### 4. CME kontrat spesifikasyonları ve maliyetleri — **KAPANDI (internetten teyit, 2026-10-31)**
+- Tick: NQ 0.25/$5, MNQ 0.25/$0.50, ES 0.25/$12.50, MES 0.25/$1.25, GC 0.10/$10, MGC 0.10/$1, CL 0.01/$10
+  — CME sayfaları + birden çok aracı kurum kaynağı aynı değerleri veriyor.
+- Maliyet (tek yön, kontrat başı) = aracı komisyonu + takas + borsa + NFA, genel perakende modeli:
+  NQ/ES $2.88, MNQ/MES $0.95, GC $3.15, MGC $1.30, CL $2.92. Kaynaklar `configs/instruments.toml` başında.
+- Zayıf nokta: CL borsa ücreti tek kaynaklı (NexusFi tahmini); CME Fee Finder'dan teyit edilecek.
 
-### 5. Binance maliyetleri ve para birimi
-- `fee_rate_percent = 0.05` (VIP0 taker, yayımlanmış tablo) — teyit.
-- PnL USDT cinsinden; `Money` USD kabul ediliyor (USDT≈USD varsayımı). Prop hesabı için önemli değil
-  (kripto prop hedefi yok), araştırma için kabul edilebilir mi?
+### 5. Binance maliyetleri — **KAPANDI (2026-10-31)**
+VIP 0 taker %0.05 / maker %0.02, Binance resmi destek makalesiyle teyit. Tüm dolumlar taker sayılıyor
+(karamsar). 1 USDT = 1 USD kabulü kaldı (araştırma için yeterli).
 
 ### 6. Kayma (`slippage_ticks`) boş
 - Hiçbir enstrümanda kayma girilmedi (uydurulmaz; M4 kalibrasyonu ölçecek).
