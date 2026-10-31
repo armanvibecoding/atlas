@@ -230,6 +230,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "statrs",
+ "tempfile",
  "thiserror",
 ]
 
