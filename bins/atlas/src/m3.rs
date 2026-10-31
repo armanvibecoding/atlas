@@ -734,6 +734,8 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
             "deploy/atlas.service",
             "deploy/logrotate.conf",
             "deploy/atlas-grok",
+            "deploy/atlas-mcp.service",
+            "deploy/nginx-atlas-mcp.conf",
         ] {
             if !h.root.join(f).exists() {
                 bad.push(format!("{f} yok"));

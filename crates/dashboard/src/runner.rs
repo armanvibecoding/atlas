@@ -14,8 +14,11 @@ pub const CLI_SCHEMA: &str = "atlas.cli/1";
 /// Alt süreç ayarları.
 #[derive(Debug, Clone)]
 pub struct CliConfig {
-    /// `atlas` yürütülebilir dosyası.
+    /// `atlas` yürütülebilir dosyası (ya da `prefix` ile birlikte bir sarmalayıcı, ör. `sudo`).
     pub atlas_bin: PathBuf,
+    /// Komut argümanlarından önce eklenen sabit argümanlar. Üretimde MCP sunucusu
+    /// `sudo -n -u atlas /usr/local/lib/atlas/atlas-grok` kullanır (beyaz liste orada da uygulanır).
+    pub prefix: Vec<String>,
     /// Alt sürece `ATLAS_HOME` olarak iletilir ve çalışma dizini yapılır. `None` → miras.
     pub atlas_home: Option<PathBuf>,
     /// Komut başına zaman aşımı.
@@ -28,6 +31,7 @@ impl CliConfig {
     pub fn new(atlas_bin: PathBuf, atlas_home: Option<PathBuf>) -> CliConfig {
         CliConfig {
             atlas_bin,
+            prefix: Vec::new(),
             atlas_home,
             timeout: Duration::from_secs(30),
             max_output_bytes: 32 * 1024 * 1024,
@@ -53,7 +57,8 @@ impl CliConfig {
     /// Çalıştırılacak süreci kurar (test edilebilirlik için ayrı).
     pub fn command(&self, args: &[String]) -> std::process::Command {
         let mut c = std::process::Command::new(&self.atlas_bin);
-        c.args(args)
+        c.args(&self.prefix)
+            .args(args)
             .env("ATLAS_ROLE", "grok")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

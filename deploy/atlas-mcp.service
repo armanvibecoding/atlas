@@ -1,0 +1,41 @@
+# /etc/systemd/system/atlas-mcp.service — Grok için uzak MCP sunucusu (ADR 0009)
+# Yalnız 127.0.0.1:8790 dinler; TLS ve dış erişim nginx'te (deploy/nginx-atlas-mcp.conf).
+# Süreç `grok` kullanıcısıdır; her araç çağrısı `sudo -n -u atlas /usr/local/lib/atlas/atlas-grok …` ile
+# çalışır (sudoers yalnız bu yardımcıyı izinler; beyaz liste yardımcıda ve CLI'da yeniden uygulanır).
+[Unit]
+Description=Atlas MCP sunucusu (Grok operatör araçları)
+After=network-online.target atlas.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=grok
+Group=grok
+# ATLAS_MCP_TOKEN=… (en az 32 karakter; root:root 600)
+EnvironmentFile=/etc/atlas/mcp.env
+ExecStart=/usr/local/lib/atlas/atlas-mcp --listen 127.0.0.1:8790 --exec /usr/bin/sudo --exec-prefix=-n --exec-prefix=-u --exec-prefix=atlas --exec-prefix=/usr/local/lib/atlas/atlas-grok
+Restart=always
+RestartSec=5
+UMask=0077
+
+# Kaynak limitleri (verify alt süreçleri de bu cgroup'ta koşar)
+MemoryMax=2G
+CPUQuota=100%
+TasksMax=128
+Nice=15
+
+# Sertleştirme. sudo setuid olduğu için NoNewPrivileges ve boş CapabilityBoundingSet KULLANILAMAZ.
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

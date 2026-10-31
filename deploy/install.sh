@@ -15,7 +15,7 @@ id atlas >/dev/null 2>&1 || useradd --system --home "$PREFIX" --shell /usr/sbin/
 id grok >/dev/null 2>&1 || useradd --create-home --shell /bin/bash grok
 
 echo "→ derleme (release)"
-(cd "$SRC" && nice -n 15 cargo build --release -j 4 -p atlas)
+(cd "$SRC" && nice -n 15 cargo build --release -j 4 -p atlas -p atlas-mcp)
 
 install -d -m 750 "$PREFIX" "$PREFIX/bin"
 install -d -o atlas -g atlas -m 750 "$PREFIX/var" "$PREFIX/var/log"
@@ -73,8 +73,20 @@ rm -f "$SUDOERS_TMP"
 # Eski kurulumdan kalan grup üyeliği kaldırılır.
 gpasswd -d grok atlas >/dev/null 2>&1 || true
 
+# MCP sunucusu (Grok'un araçları, ADR 0009): grok kullanıcısı olarak çalışır, /opt/atlas'a erişimi yoktur.
+install -m 755 -o root -g root "$SRC/target/release/atlas-mcp" /usr/local/lib/atlas/atlas-mcp
+install -m 644 "$SRC/deploy/atlas-mcp.service" /etc/systemd/system/atlas-mcp.service
+if [[ ! -f /etc/atlas/mcp.env ]]; then
+  umask 077
+  echo "ATLAS_MCP_TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > /etc/atlas/mcp.env
+  umask 022
+fi
+chown root:root /etc/atlas/mcp.env
+chmod 600 /etc/atlas/mcp.env
+
 systemctl daemon-reload
-systemctl enable atlas.service
+systemctl enable atlas.service atlas-mcp.service
+systemctl try-restart atlas-mcp.service
 
 cat <<MSG
 Kurulum tamam.
@@ -83,5 +95,6 @@ Kurulum tamam.
 3) Başlat: systemctl start atlas && journalctl -u atlas -f
 4) Grok anahtarı (/home/grok/.ssh/authorized_keys):
    restrict,command="/usr/local/bin/atlas-admin" ssh-ed25519 AAAA... grok
-5) Webhook: $PREFIX/configs/atlas.toml [webhook] url = "https://..."
+5) Webhook: /etc/atlas/atlas.env → ATLAS_WEBHOOK_URL=… ve ATLAS_WEBHOOK_KEY=… ; sonra: atlas webhook-test
+6) MCP: systemctl start atlas-mcp ; token /etc/atlas/mcp.env ; TLS için deploy/nginx-atlas-mcp.conf
 MSG

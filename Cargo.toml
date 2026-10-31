@@ -18,6 +18,7 @@ members = [
     "crates/ml",
     "crates/dashboard",
     "crates/plugin",
+    "crates/mcp",
     "bins/atlas",
 ]
 # WASM eklenti kaynakları ayrı crate'lerdir (wasm32 hedefi); workspace üyesi değildir.

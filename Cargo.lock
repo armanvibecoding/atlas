@@ -280,6 +280,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "atlas-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atlas-dashboard",
+ "axum",
+ "clap",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "atlas-ml"
 version = "0.1.0"
 dependencies = [

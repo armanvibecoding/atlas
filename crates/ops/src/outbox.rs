@@ -223,6 +223,8 @@ impl Outbox {
 pub struct HttpSender {
     url: String,
     client: Option<reqwest::blocking::Client>,
+    /// İsteğe bağlı kimlik doğrulama başlığı (ad, değer) — ör. `Authorization: Bearer …`.
+    auth: Option<(String, String)>,
 }
 
 impl HttpSender {
@@ -234,7 +236,27 @@ impl HttpSender {
         HttpSender {
             url: url.trim().to_string(),
             client,
+            auth: None,
         }
+    }
+
+    /// Kimlik doğrulama başlığı ekler. `scheme` boşsa değer yalın anahtardır, değilse `"<scheme> <key>"`.
+    /// Anahtar boşsa başlık eklenmez.
+    pub fn with_auth(mut self, header: &str, scheme: &str, key: &str) -> HttpSender {
+        let (header, scheme, key) = (header.trim(), scheme.trim(), key.trim());
+        if !key.is_empty() && !header.is_empty() {
+            let value = if scheme.is_empty() {
+                key.to_string()
+            } else {
+                format!("{scheme} {key}")
+            };
+            self.auth = Some((header.to_string(), value));
+        }
+        self
+    }
+
+    pub fn has_auth(&self) -> bool {
+        self.auth.is_some()
     }
 }
 
@@ -245,9 +267,13 @@ impl Sender for HttpSender {
 
     fn send(&self, m: &Message) -> Result<(), String> {
         let c = self.client.as_ref().ok_or("http istemcisi yok")?;
-        let r = c
+        let mut req = c
             .post(&self.url)
-            .header("Idempotency-Key", &m.idempotency_key)
+            .header("Idempotency-Key", &m.idempotency_key);
+        if let Some((h, v)) = &self.auth {
+            req = req.header(h.as_str(), v.as_str());
+        }
+        let r = req
             .json(&serde_json::json!({"schema": "atlas.webhook/1", "kind": m.kind, "created": m.created.0, "body": m.body}))
             .send()
             .map_err(|e| e.to_string())?;
@@ -348,6 +374,16 @@ mod tests {
         assert!(r.paused_unconfigured);
         assert!(e.is_empty());
         assert_eq!(ob.counts().unwrap(), (1, 0, 0));
+    }
+
+    #[test]
+    fn auth_header_only_with_key() {
+        let h = HttpSender::new("http://x").with_auth("Authorization", "Bearer", "");
+        assert!(!h.has_auth());
+        let h = HttpSender::new("http://x").with_auth("Authorization", "Bearer", " k1 ");
+        assert_eq!(h.auth, Some(("Authorization".into(), "Bearer k1".into())));
+        let h = HttpSender::new("http://x").with_auth("X-Api-Key", "", "k2");
+        assert_eq!(h.auth, Some(("X-Api-Key".into(), "k2".into())));
     }
 
     #[test]

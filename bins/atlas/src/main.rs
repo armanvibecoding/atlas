@@ -124,6 +124,8 @@ enum Cmd {
     KillReset { scope: String },
     /// Journal'a operatör notu (metin argümanda ya da stdin'de).
     Note { text: Vec<String> },
+    /// Webhook'a tek test olayı gönder (§7.1 madde 4; yalnız Arman).
+    WebhookTest,
 }
 
 #[derive(Subcommand)]
@@ -239,6 +241,7 @@ fn guard_role(cmd: &Cmd) -> Result<()> {
     if role.eq_ignore_ascii_case("grok") {
         let forbidden = match cmd {
             Cmd::KillReset { .. } => Some("kill-reset"),
+            Cmd::WebhookTest => Some("webhook-test"),
             Cmd::Data {
                 cmd:
                     DataCmd::PullBinance { .. }
@@ -397,6 +400,13 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
         Cmd::Kill { scope, reason } => kill(&h, out, &scope, &reason.join(" ")),
         Cmd::KillReset { scope } => kill_reset(&h, out, &scope),
         Cmd::Note { text } => note(&h, out, text),
+        Cmd::WebhookTest => {
+            let v = daemon::webhook_test(&h)?;
+            out.emit("webhook-test", true, v, || {
+                "webhook test olayı teslim edildi".into()
+            });
+            Ok(true)
+        }
     }
 }
 

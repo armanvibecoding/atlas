@@ -156,6 +156,7 @@ pub const READ_COMMANDS: &[ReadCommand] = &[
 pub const EXCLUDED: &[(&str, &str)] = &[
     ("kill", "yazma: kill switch tetikler"),
     ("kill-reset", "yazma, yalnız Arman"),
+    ("webhook-test", "dış teslim (webhook POST), yalnız Arman"),
     ("note", "yazma: journal'a operatör notu"),
     (
         "strategy",

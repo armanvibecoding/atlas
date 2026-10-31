@@ -206,6 +206,45 @@ fn sd_notify(msg: &str) {
 fn sd_notify(_msg: &str) {}
 
 /// Daemon'u çalıştırır. Canlı modda sonsuza kadar (durdurma dosyası `var/daemon.stop` ya da sinyal).
+/// Üretim webhook göndericisi. Sırlar repo'da değil (kural 10): URL ve anahtar /etc/atlas/atlas.env'den.
+/// Öncelik: `ATLAS_WEBHOOK_URL` > atlas.toml `[webhook] url`. Anahtar `ATLAS_WEBHOOK_KEY`; başlık
+/// `ATLAS_WEBHOOK_HEADER` (varsayılan Authorization), şema `ATLAS_WEBHOOK_SCHEME` (varsayılan Bearer, boş = yalın).
+pub fn webhook_sender(w: &WebhookCfg) -> HttpSender {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    let url = env("ATLAS_WEBHOOK_URL").unwrap_or(w.url.clone());
+    HttpSender::new(&url).with_auth(
+        &env("ATLAS_WEBHOOK_HEADER").unwrap_or_else(|| "Authorization".into()),
+        &std::env::var("ATLAS_WEBHOOK_SCHEME").unwrap_or_else(|_| "Bearer".into()),
+        &env("ATLAS_WEBHOOK_KEY").unwrap_or_default(),
+    )
+}
+
+/// Tek bir test olayını hemen gönderir (outbox'a girmez; §7.1 madde 4). Yalnız Arman.
+pub fn webhook_test(h: &Home) -> Result<serde_json::Value> {
+    let cfg = m3_toml(h)?;
+    let sender = webhook_sender(&cfg.webhook);
+    if !sender.configured() {
+        anyhow::bail!(
+            "webhook yapılandırılmamış (ATLAS_WEBHOOK_URL ya da atlas.toml [webhook] url)"
+        );
+    }
+    let t = now();
+    let key = format!("webhook-test-{}", t.0);
+    let msg = atlas_ops::outbox::Message {
+        idempotency_key: key.clone(),
+        created: t,
+        kind: "test".into(),
+        body: json!({"text": "Atlas webhook testi — bu bir deneme olayıdır, işlem gerekmez.", "source": "atlas"}),
+        attempts: 0,
+        next_try: t,
+        last_error: None,
+    };
+    sender
+        .send(&msg)
+        .map_err(|e| anyhow!("teslim başarısız: {e}"))?;
+    Ok(json!({"delivered": true, "idempotency_key": key, "auth_header": sender.has_auth()}))
+}
+
 pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
     let cfg = m3_toml(h)?;
     let gcfg = gauntlet_cfg(h)?;
@@ -233,11 +272,10 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         Outbox::open(&opts.outbox)?,
         opts.state.clone(),
     )?;
-    let url = opts
-        .webhook_override
-        .clone()
-        .unwrap_or(cfg.webhook.url.clone());
-    let sender = HttpSender::new(&url);
+    let sender = match opts.webhook_override.clone() {
+        Some(u) => HttpSender::new(&u),
+        None => webhook_sender(&cfg.webhook),
+    };
     let mut reg = Registry::open(&opts.registry)?;
     let store = atlas_data::Store::new(h.store_path());
     let symbol = cfg
