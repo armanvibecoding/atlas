@@ -219,6 +219,18 @@ impl Outbox {
     }
 }
 
+/// Hata metninden yapılandırılmış URL'yi (ve sorgu dizesini) temizler — ikinci savunma katmanı.
+fn redact_url(msg: &str, url: &str) -> String {
+    let mut out = msg.to_string();
+    let base = url.split('?').next().unwrap_or(url);
+    for s in [url, base] {
+        if !s.is_empty() {
+            out = out.replace(s, "<webhook>");
+        }
+    }
+    out
+}
+
 /// HTTP webhook teslimi (POST JSON, `Idempotency-Key` başlığı). URL boşsa "yapılandırılmamış".
 pub struct HttpSender {
     url: String,
@@ -267,6 +279,9 @@ impl Sender for HttpSender {
 
     fn send(&self, m: &Message) -> Result<(), String> {
         let c = self.client.as_ref().ok_or("http istemcisi yok")?;
+        if !self.url.starts_with("https://") && !self.url.starts_with("http://") {
+            return Err("webhook URL http(s) değil".into());
+        }
         let mut req = c
             .post(&self.url)
             .header("Idempotency-Key", &m.idempotency_key);
@@ -276,7 +291,9 @@ impl Sender for HttpSender {
         let r = req
             .json(&serde_json::json!({"schema": "atlas.webhook/1", "kind": m.kind, "created": m.created.0, "body": m.body}))
             .send()
-            .map_err(|e| e.to_string())?;
+            // URL gizli olabilir (anahtar/yol içerir): hata metnine girmez, çünkü last_error ve
+            // outbox_dead olayları journal'a yazılır ve Grok'un okuma araçlarıyla görünür.
+            .map_err(|e| redact_url(&e.without_url().to_string(), &self.url))?;
         if r.status().is_success() {
             Ok(())
         } else {
@@ -374,6 +391,20 @@ mod tests {
         assert!(r.paused_unconfigured);
         assert!(e.is_empty());
         assert_eq!(ob.counts().unwrap(), (1, 0, 0));
+    }
+
+    #[test]
+    fn transport_error_never_contains_url() {
+        // Bağlanılamayan yerel port: hata metni URL'yi (gizli yol/sorgu) içermemeli.
+        let url = "http://127.0.0.1:9/gizli-yol-abc123?token=sir";
+        let h = HttpSender::new(url).with_auth("Authorization", "Bearer", "k");
+        let e = h.send(&msg("z", 1)).unwrap_err();
+        assert!(!e.contains("gizli-yol-abc123"), "{e}");
+        assert!(!e.contains("sir"), "{e}");
+        assert_eq!(
+            redact_url("x http://h/p?q=1 y http://h/p z", "http://h/p?q=1"),
+            "x <webhook> y <webhook> z"
+        );
     }
 
     #[test]
