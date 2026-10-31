@@ -22,10 +22,16 @@ install -m 755 "$SRC/target/release/atlas" "$PREFIX/bin/atlas"
 if [[ -f "$SRC/target/release/atlas-dashboard" ]]; then
   install -m 755 "$SRC/target/release/atlas-dashboard" "$PREFIX/bin/atlas-dashboard"
 fi
-rsync -a --delete "$SRC/configs/" "$PREFIX/configs/"
+# Sunucudaki atlas.toml (webhook, onay anahtarı, bütçeler) güncellemede EZİLMEZ; yalnız ilk kurulumda kopyalanır.
+rsync -a --delete --exclude atlas.toml "$SRC/configs/" "$PREFIX/configs/"
+if [[ ! -f "$PREFIX/configs/atlas.toml" ]]; then
+  cp "$SRC/configs/atlas.toml" "$PREFIX/configs/atlas.toml"
+elif ! cmp -s "$SRC/configs/atlas.toml" "$PREFIX/configs/atlas.toml"; then
+  echo "NOT: repo atlas.toml sunucudakinden farklı; sunucudaki korundu. Fark: diff $SRC/configs/atlas.toml $PREFIX/configs/atlas.toml"
+fi
 rsync -a --delete "$SRC/strategies/" "$PREFIX/strategies/"
-install -d -m 755 "$PREFIX/deploy"
-install -m 755 "$SRC/deploy/atlas-admin" "$PREFIX/deploy/atlas-admin"
+# deploy/ tamamı (verify m3 sarmalayıcıyı ve kurulum dosyalarını buradan denetler).
+rsync -a --delete "$SRC/deploy/" "$PREFIX/deploy/"
 chown -R atlas:atlas "$PREFIX"
 
 install -d -m 750 /etc/atlas
