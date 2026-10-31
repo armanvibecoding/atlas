@@ -16,6 +16,7 @@ members = [
     "crates/search",
     "crates/agents",
     "crates/ml",
+    "crates/dashboard",
     "bins/atlas",
 ]
 
@@ -61,6 +62,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 proptest = "1"
 tempfile = "3"
+# M4 dashboard (ADR 0007): yalnız gereken özellikler açık.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "query", "json"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "process", "time", "sync", "signal"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
