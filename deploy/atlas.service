@@ -19,10 +19,14 @@ WatchdogSec=300
 TimeoutStopSec=60
 
 # Kaynak limitleri
-MemoryMax=6G
-CPUQuota=300%
+MemoryMax=3G
+CPUQuota=200%
 LimitNOFILE=65536
 TasksMax=512
+# Paylaşımlı sunucu (Albion, adintel, paper-challenge…): düşük öncelik.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
 
 # Sertleştirme
 NoNewPrivileges=yes

@@ -8,13 +8,14 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX=/opt/atlas
 
 [[ $EUID -eq 0 ]] || { echo "root gerekli" >&2; exit 1; }
+command -v rsync >/dev/null || apt-get install -y rsync
 command -v cargo >/dev/null || { echo "önce Rust kur: https://rustup.rs" >&2; exit 1; }
 
 id atlas >/dev/null 2>&1 || useradd --system --home "$PREFIX" --shell /usr/sbin/nologin atlas
 id grok >/dev/null 2>&1 || useradd --create-home --shell /bin/bash grok
 
 echo "→ derleme (release)"
-(cd "$SRC" && cargo build --release -p atlas)
+(cd "$SRC" && nice -n 15 cargo build --release -j 4 -p atlas)
 
 install -d -o atlas -g atlas -m 750 "$PREFIX" "$PREFIX/bin" "$PREFIX/var" "$PREFIX/var/log"
 install -m 755 "$SRC/target/release/atlas" "$PREFIX/bin/atlas"
