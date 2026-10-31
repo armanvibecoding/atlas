@@ -3,20 +3,15 @@
 Belirsizlikte uydurma yok (spec §8). Her madde: durum, neden önemli, önerilen yol.
 Son güncelleme: 2026-10-31 (M1).
 
-## Engelleyiciler (M1 yeşili için)
+## Kapananlar
 
-### 1. Hedef prop firması ve algo politikası (M0) — **ENGEL: M1 yeşil + M5**
-- Topstep, MyFundedFutures ve Apex Türkiye'yi kabul etmiyor (2026-10-02 resmi sayfalardan doğrulandı).
-  Spec'teki "Rithmic/Tradovate üzerinden CME futures prop" M5 hedefi bu hâliyle mümkün değil.
-- Aday: **FTMO** (forex/CFD; Türkiye yasaklı listede değil, EA serbest — ikincil kaynak, yazılı teyit yok).
-- İstenen: firmanın **yazılı** Türkiye uygunluğu + algoritmik işlem politikası.
-- Öneri: FTMO desteğinden e-posta ile teyit. Gelirse M5 executor'ı MT5/cTrader olur (ADR), veri Dukascopy CFD.
-
-### 2. `configs/props/ftmo_100k.toml` doldurulmalı — **ENGEL: `verify m1`**
-- Tüm alanlar boş; config yüklenmiyor. `atlas verify m1` → `prop_config_filled` FAIL (tek kırmızı).
-- Dolduğu anda prop uyum testleri (taban, kontrat tavanı, günlük limit, drawdown türü, kilit, consistency,
-  saat kuralları) otomatik koşar.
-- Her alan firmanın yazılı kuralından; kural yoksa `"none"`.
+### 1–2. Hedef firma ve prop config — **KAPANDI (2026-10-31)**
+- Arman kararı: "genel prop firma kuralları olsun yeterli". Belirli firma yok.
+- `configs/props/generic_100k.toml`: 100k, hedef %10, statik toplam zarar %10, günlük zarar %5
+  (gün başı bakiye, UTC gece yarısı), 5 kontrat, hafta sonu tutma yok, haber ±2 dk, algo serbest.
+- `verify m1` 24/24 yeşil.
+- Not: gerçek bir firmaya geçerken (M5) o firmanın yazılı kuralları + Türkiye uygunluğu + algo izni ayrıca
+  teyit edilir (Topstep/MFFU/Apex Türkiye'yi kabul etmiyor).
 
 ## Onay bekleyen öneriler
 

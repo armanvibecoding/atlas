@@ -40,6 +40,6 @@ M2–M3'te eklenecek: `report`, `strategies`, `strategy pause|demote|resume`, `e
 
 ## Durum (2026-10-31)
 
-- M1 kodu tamam; `verify m1` 18/19 — tek kırmızı `prop_config_filled` (Arman'ın doldurması gereken firma kuralları).
+- M1 tamam; `verify m1` 24/24 yeşil (genel prop kuralları).
 - Veri: Binance BTCUSDT ve ETHUSDT 1m, 2024-11 → 2026-10.
 - Webhook/outbox, daemon, sarmalayıcı: M3.

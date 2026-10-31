@@ -1,0 +1,25 @@
+# GENEL PROP KURALLARI — 100k (belirli bir firma DEĞİL).
+# Arman kararı (2026-10-31): "genel prop firma kuralları olsun yeterli".
+# Değerler sektörde yaygın değerlendirme (challenge) kurallarıdır: hedef %10, toplam zarar %10 (statik),
+# günlük zarar %5. Gerçek firmaya geçerken o firmanın yazılı kurallarıyla yeni dosya açılır.
+
+firm = "GENEL (tipik prop kuralları, belirli firma değil)"
+account_label = "generic_100k"
+starting_balance_usd = "100000"
+profit_target_usd = "10000"
+drawdown_type = "static"
+drawdown_amount_usd = "10000"
+drawdown_lock_level_usd = "none"
+daily_loss_limit_usd = "5000"
+daily_loss_reference = "day_start_balance"
+day_reset_tz = "UTC"
+day_reset_time = "00:00"
+consistency_ratio = "none"
+max_contracts = "5"
+rules_tz = "UTC"
+no_new_entries_after = "none"
+flat_by = "none"
+weekend_holding_allowed = false
+news_blackout_minutes_before = "2"
+news_blackout_minutes_after = "2"
+algo_trading_allowed = true

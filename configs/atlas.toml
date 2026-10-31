@@ -6,7 +6,7 @@ store = "var/data"
 
 [account]
 # Hedef prop config'i (configs/props altında). Boş alanları ARMAN doldurur.
-prop = "props/ftmo_100k.toml"
+prop = "props/generic_100k.toml"
 
 [data]
 # Databento çekim başına USD tavanı. ARMAN DOLDURUR. Boşken her ücretli çekim onay ister (tavan = 0).
