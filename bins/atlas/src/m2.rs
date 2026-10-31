@@ -180,7 +180,7 @@ pub fn strategies_list(h: &Home, out: &Out) -> Result<bool> {
         let text = std::fs::read_to_string(&p)?;
         let row = match Genome::from_toml_str(&text) {
             Ok(g) => {
-                let last = reg.experiments(1, Some(&g.name))?.into_iter().next();
+                let last = reg.experiments_for_hash(&g.hash(), 1)?.into_iter().next();
                 json!({"name": g.name, "instrument": g.instrument, "hash": &g.hash()[..12], "tags": g.tags,
                     "stage": if last.as_ref().is_some_and(|e| e.passed) { "gauntlet_geçti" } else { "aday" },
                     "last_experiment": last})
@@ -220,7 +220,7 @@ pub fn strategies_list(h: &Home, out: &Out) -> Result<bool> {
 pub fn strategies_show(h: &Home, out: &Out, name: &str) -> Result<bool> {
     let (g, path) = load_genome(h, name)?;
     let reg = open_registry(h)?;
-    let last = reg.experiments(1, Some(&g.name))?.into_iter().next();
+    let last = reg.experiments_for_hash(&g.hash(), 1)?.into_iter().next();
     let md = match &last {
         Some(e) => reg.report_md(e.id)?,
         None => None,
@@ -407,7 +407,9 @@ pub fn verify_m2(h: &Home, out: &Out, fake_n: usize) -> Result<bool> {
     // 4. Beş referans stratejinin gauntlet raporu sicilde (güncel veri sürümüyle).
     let reg = open_registry(h)?;
     for name in REFERENCE {
-        let e = reg.experiments(1, Some(name))?.into_iter().next();
+        // Güncel genom dosyasının hash'iyle eşleşen rapor aranır (dosya değiştiyse eski rapor sayılmaz).
+        let hash = load_genome(h, name)?.0.hash();
+        let e = reg.experiments_for_hash(&hash, 1)?.into_iter().next();
         let ok = e.is_some();
         checks.push(check(
             &format!("reference_report_{name}"),

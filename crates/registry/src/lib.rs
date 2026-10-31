@@ -430,14 +430,38 @@ impl Registry {
         })
     }
 
+    /// Genom hash'ine göre deneyler (en yeni önce). Aşama kararları için kullanılmalı: ad değişebilir,
+    /// içerik hash'i değişmez — adı aynı bırakılıp değiştirilen bir genom eski sonucu devralamaz.
+    pub fn experiments_for_hash(
+        &self,
+        genome_hash: &str,
+        limit: usize,
+    ) -> Result<Vec<ExperimentRow>> {
+        self.query_rows("WHERE genome_hash = ?1", Some(genome_hash), limit)
+    }
+
     pub fn experiments(&self, limit: usize, name: Option<&str>) -> Result<Vec<ExperimentRow>> {
-        let sql = format!(
-            "SELECT id, source, name, genome_hash, passed, failed_gate, trades, sharpe, created_ts FROM experiments {} ORDER BY id DESC LIMIT {limit}",
+        self.query_rows(
             if name.is_some() {
                 "WHERE name = ?1"
             } else {
                 ""
-            }
+            },
+            name,
+            limit,
+        )
+    }
+
+    fn query_rows(
+        &self,
+        filter: &str,
+        arg: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ExperimentRow>> {
+        let name = arg;
+        let sql = format!(
+            "SELECT id, source, name, genome_hash, passed, failed_gate, trades, sharpe, created_ts FROM experiments {} ORDER BY id DESC LIMIT {limit}",
+            if name.is_some() { filter } else { "" }
         );
         let mut st = self.conn.prepare(&sql)?;
         let map = |r: &rusqlite::Row<'_>| {
@@ -524,6 +548,8 @@ mod tests {
         assert_eq!(s.passed, 1);
         assert_eq!(s.failed_gate_histogram.get("2"), Some(&1));
         assert_eq!(r.experiments(10, Some("a")).unwrap().len(), 1);
+        assert_eq!(r.experiments_for_hash("h-b", 10).unwrap()[0].name, "b");
+        assert!(r.experiments_for_hash("h-x", 10).unwrap().is_empty());
         assert_eq!(r.report_md(1).unwrap().as_deref(), Some("# a"));
     }
 
