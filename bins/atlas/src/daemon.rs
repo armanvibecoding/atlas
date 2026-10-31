@@ -392,6 +392,22 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         .copied()
         .collect();
     let mut unsaved: Vec<Bar> = Vec::new();
+    // Grok'un piyasa görüntüsü için son 24 sa (yalnız canlı işlem bağlamı; araştırma/arama bunu görmez).
+    // Canlıda depodaki en son barlardan doldurulur ki yeniden başlatmadan hemen sonra da geçmiş dolu olsun.
+    let mut mkt: std::collections::VecDeque<Bar> = if replay {
+        history.iter().copied().collect()
+    } else {
+        store
+            .load_bars(
+                "binance_futures",
+                &symbol,
+                "ohlcv_1m",
+                start.minus(NANOS_PER_DAY),
+                UnixNanos::MAX,
+            )
+            .map(|(b, _)| b.into_iter().collect())
+            .unwrap_or_default()
+    };
     let mut runners: BTreeMap<String, Runner> = BTreeMap::new();
     // Grok hesabı: journal'daki uygulanmış emirler + depodaki barlarla yeniden kurulur.
     let mut grok = crate::grok::GrokDesk::rebuild(
@@ -447,6 +463,12 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             match &e.payload {
                 MarketPayload::Bar(b) => {
                     history.push(*b);
+                    if mkt.back().is_none_or(|l| b.close_ts > l.close_ts) {
+                        mkt.push_back(*b);
+                    }
+                    while mkt.len() > crate::grok::MARKET_BARS {
+                        mkt.pop_front();
+                    }
                     if !replay {
                         unsaved.push(*b);
                     }
@@ -783,7 +805,10 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             let _ = crate::grok::write_atomic(p, &grok.account.snapshot(t));
         }
         if let Some(p) = &opts.market_snapshot {
-            let _ = crate::grok::write_atomic(p, &crate::grok::market_snapshot(&inst, &history, t));
+            let _ = crate::grok::write_atomic(
+                p,
+                &crate::grok::market_snapshot(&inst, mkt.make_contiguous(), t),
+            );
         }
 
         // 9. Checkpoint, kalıcılık
