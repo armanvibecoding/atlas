@@ -17,22 +17,36 @@ id grok >/dev/null 2>&1 || useradd --create-home --shell /bin/bash grok
 echo "→ derleme (release)"
 (cd "$SRC" && nice -n 15 cargo build --release -j 4 -p atlas)
 
-install -d -o atlas -g atlas -m 750 "$PREFIX" "$PREFIX/bin" "$PREFIX/var" "$PREFIX/var/log"
+install -d -m 750 "$PREFIX" "$PREFIX/bin"
+install -d -o atlas -g atlas -m 750 "$PREFIX/var" "$PREFIX/var/log"
 install -m 755 "$SRC/target/release/atlas" "$PREFIX/bin/atlas"
 if [[ -f "$SRC/target/release/atlas-dashboard" ]]; then
   install -m 755 "$SRC/target/release/atlas-dashboard" "$PREFIX/bin/atlas-dashboard"
 fi
 # Sunucudaki atlas.toml (webhook, onay anahtarı, bütçeler) güncellemede EZİLMEZ; yalnız ilk kurulumda kopyalanır.
 rsync -a --delete --exclude atlas.toml "$SRC/configs/" "$PREFIX/configs/"
+if [[ -L "$PREFIX/configs/atlas.toml" ]]; then
+  echo "HATA: $PREFIX/configs/atlas.toml sembolik bağlantı — reddedildi" >&2; exit 1
+fi
 if [[ ! -f "$PREFIX/configs/atlas.toml" ]]; then
-  cp "$SRC/configs/atlas.toml" "$PREFIX/configs/atlas.toml"
+  install -m 640 -o root -g atlas "$SRC/configs/atlas.toml" "$PREFIX/configs/atlas.toml"
 elif ! cmp -s "$SRC/configs/atlas.toml" "$PREFIX/configs/atlas.toml"; then
   echo "NOT: repo atlas.toml sunucudakinden farklı; sunucudaki korundu. Fark: diff $SRC/configs/atlas.toml $PREFIX/configs/atlas.toml"
 fi
 rsync -a --delete "$SRC/strategies/" "$PREFIX/strategies/"
 # deploy/ tamamı (verify m3 sarmalayıcıyı ve kurulum dosyalarını buradan denetler).
 rsync -a --delete "$SRC/deploy/" "$PREFIX/deploy/"
-chown -R atlas:atlas "$PREFIX"
+# Sahiplik: servis yalnız var/ altına yazar; bin/, configs/, strategies/, deploy/ root'a ait (servis hesabı
+# root'un çalıştırdığı/okuduğu dosyaları değiştiremez).
+chown root:atlas "$PREFIX"
+chmod 750 "$PREFIX"
+chown -R root:atlas "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
+chmod -R go-w "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
+chmod -R g+rX "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
+chown -R atlas:atlas "$PREFIX/var"
+# var/ grup (atlas) yazılabilir + setgid: Grok (grok ∈ atlas) kill/note/pause ile journal ve sicile yazabilir.
+chmod -R g+rwX "$PREFIX/var"
+find "$PREFIX/var" -type d -exec chmod g+s {} +
 
 install -d -m 750 /etc/atlas
 if [[ ! -f /etc/atlas/atlas.env ]]; then
