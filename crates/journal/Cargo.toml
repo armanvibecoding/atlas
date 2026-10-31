@@ -1,0 +1,24 @@
+[package]
+name = "atlas-journal"
+description = "Append-only olay kaynağı (SQLite) + replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_journal"
+
+[dependencies]
+atlas-core.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

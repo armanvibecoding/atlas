@@ -1,0 +1,27 @@
+[package]
+name = "atlas"
+description = "Atlas tek CLI (§6)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "atlas"
+path = "src/main.rs"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-risk.workspace = true
+atlas-journal.workspace = true
+atlas-data.workspace = true
+atlas-sim.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

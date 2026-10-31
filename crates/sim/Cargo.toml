@@ -1,0 +1,25 @@
+[package]
+name = "atlas-sim"
+description = "Olay tabanlı simülasyon motoru, dolum modelleri, M1 doğrulamaları"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_sim"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-risk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+statrs.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,28 @@
+# Atlas ana yapılandırması. Göreli yollar ATLAS_HOME'a (varsayılan: repo kökü) göredir.
+
+[paths]
+journal = "var/journal.sqlite"
+store = "var/data"
+
+[account]
+# Hedef prop config'i (configs/props altında). Boş alanları ARMAN doldurur.
+prop = "props/ftmo_100k.toml"
+
+[data]
+# Databento çekim başına USD tavanı. ARMAN DOLDURUR. Boşken her ücretli çekim onay ister (tavan = 0).
+max_usd_per_pull = ""
+
+[verify]
+# M1 doğrulamalarında kullanılan sabit seed (determinizm).
+seed = 20261031
+
+# Atlas'ın kendi risk politikası (firmadan bağımsız). Yalnız sıkılaştırılabilir.
+# DEĞERLER ÖNERİDİR — Arman onaylamalı (docs/OPEN_QUESTIONS.md #3). Gevşetme = insan onayı.
+[risk]
+cooldown_after_stop_minutes = 15
+max_risk_per_trade_usd = "250"
+max_group_net_contracts = "2"
+consistency_headroom = "0.8"
+drawdown_near = "0.25"
+stop_slippage_buffer_ticks = 2
+min_minutes_before_week_close = 60

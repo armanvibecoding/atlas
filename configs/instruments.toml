@@ -1,0 +1,134 @@
+# Enstrüman tanımları.
+# - tick_size / tick_value / lot_size: borsa kontrat spesifikasyonu. Binance değerleri her çekimde
+#   exchangeInfo ile otomatik doğrulanır (uyuşmazsa çekim durur).
+# - costs: UYDURULMAZ. Boş alan = doldurulmadı → bu enstrümanla simülasyon/RiskGate açık hata verir.
+# - exposure_group / exposure_weight: net maruziyet ve ağırlıklı kontrat sayımı (mini=1, mikro=0.1).
+
+# ---- CME (kaynak: CME kontrat spesifikasyonları — teyit edilecek, OPEN_QUESTIONS #4) ----
+[[instrument]]
+symbol = "NQ"
+venue = "cme"
+kind = "future"
+tick_size = "0.25"
+tick_value_usd = "5"
+session = "cme_globex"
+exposure_group = "us_equity_tech"
+exposure_weight = "1"
+[instrument.costs]
+commission_per_contract_usd = ""    # ARMAN DOLDURUR — broker/firma ücreti
+exchange_fee_per_contract_usd = ""  # ARMAN DOLDURUR
+slippage_ticks = ""                 # kalibrasyonla ölçülecek (M4); şimdilik boş
+
+[[instrument]]
+symbol = "MNQ"
+venue = "cme"
+kind = "future"
+tick_size = "0.25"
+tick_value_usd = "0.5"
+session = "cme_globex"
+exposure_group = "us_equity_tech"
+exposure_weight = "0.1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+[[instrument]]
+symbol = "ES"
+venue = "cme"
+kind = "future"
+tick_size = "0.25"
+tick_value_usd = "12.5"
+session = "cme_globex"
+exposure_group = "us_equity_broad"
+exposure_weight = "1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+[[instrument]]
+symbol = "MES"
+venue = "cme"
+kind = "future"
+tick_size = "0.25"
+tick_value_usd = "1.25"
+session = "cme_globex"
+exposure_group = "us_equity_broad"
+exposure_weight = "0.1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+[[instrument]]
+symbol = "GC"
+venue = "cme"
+kind = "future"
+tick_size = "0.1"
+tick_value_usd = "10"
+session = "cme_globex"
+exposure_group = "gold"
+exposure_weight = "1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+[[instrument]]
+symbol = "MGC"
+venue = "cme"
+kind = "future"
+tick_size = "0.1"
+tick_value_usd = "1"
+session = "cme_globex"
+exposure_group = "gold"
+exposure_weight = "0.1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+[[instrument]]
+symbol = "CL"
+venue = "cme"
+kind = "future"
+tick_size = "0.01"
+tick_value_usd = "10"
+session = "cme_globex"
+exposure_group = "crude"
+exposure_weight = "1"
+[instrument.costs]
+commission_per_contract_usd = ""
+exchange_fee_per_contract_usd = ""
+slippage_ticks = ""
+
+# ---- Binance USDⓈ-M perpetual (ücretsiz veri). 1 lot = lot_size kadar dayanak. ----
+# tick_value = tick_size × lot_size (BTC: 0.1 × 0.001 = 0.0001 USDT ≈ USD varsayımı, OPEN_QUESTIONS #5)
+[[instrument]]
+symbol = "BTCUSDT"
+venue = "binance"
+kind = "perpetual"
+tick_size = "0.1"
+tick_value_usd = "0.0001"
+lot_size = "0.001"
+session = "always"
+exposure_group = "crypto_btc"
+exposure_weight = "0.001"
+[instrument.costs]
+fee_rate_percent = "0.05"  # Binance VIP0 taker (yayımlanmış tablo) — teyit: OPEN_QUESTIONS #5
+slippage_ticks = ""        # kalibrasyonla ölçülecek
+
+[[instrument]]
+symbol = "ETHUSDT"
+venue = "binance"
+kind = "perpetual"
+tick_size = "0.01"
+tick_value_usd = "0.00001"
+lot_size = "0.001"
+session = "always"
+exposure_group = "crypto_eth"
+exposure_weight = "0.001"
+[instrument.costs]
+fee_rate_percent = "0.05"
+slippage_ticks = ""

@@ -1,0 +1,24 @@
+# FTMO 100k — HEDEF ADAY (2026-10-31). Türkiye uygunluğu ve algo izni M0 kapsamında YAZILI teyit edilmeli.
+# HER ALAN ZORUNLU. Boş ("") alan varsa config YÜKLENMEZ. Kural firmada yoksa "none" yaz.
+# Değerler UYDURULMAZ: firmanın yazılı kuralından teyit edilir.
+
+firm = ""                          # ARMAN DOLDURUR — firma kuralından teyit
+account_label = ""                 # ARMAN DOLDURUR — ör. "100k_challenge_phase1"
+starting_balance_usd = ""          # ARMAN DOLDURUR — firma kuralından teyit
+profit_target_usd = ""             # ARMAN DOLDURUR — firma kuralından teyit
+drawdown_type = ""                 # ARMAN DOLDURUR — static | eod_trailing | intraday_trailing
+drawdown_amount_usd = ""           # ARMAN DOLDURUR — firma kuralından teyit
+drawdown_lock_level_usd = ""       # ARMAN DOLDURUR — trailing taban bu bakiyede durur; yoksa "none"
+daily_loss_limit_usd = ""          # ARMAN DOLDURUR — yoksa "none"
+daily_loss_reference = ""          # ARMAN DOLDURUR — day_start_balance | day_start_equity
+day_reset_tz = ""                  # ARMAN DOLDURUR — firmanın gün sınırı saat dilimi (IANA, ör. Europe/Prague)
+day_reset_time = ""                # ARMAN DOLDURUR — SS:DD
+consistency_ratio = ""             # ARMAN DOLDURUR — tek gün kârı / toplam kâr ≤ oran (0-1); yoksa "none"
+max_contracts = ""                 # ARMAN DOLDURUR — ağırlıklı (mini=1, mikro=0.1)
+rules_tz = ""                      # ARMAN DOLDURUR — aşağıdaki saatlerin saat dilimi
+no_new_entries_after = ""          # ARMAN DOLDURUR — SS:DD ya da "none"
+flat_by = ""                       # ARMAN DOLDURUR — SS:DD ya da "none"
+weekend_holding_allowed = ""       # ARMAN DOLDURUR — true | false
+news_blackout_minutes_before = ""  # ARMAN DOLDURUR — dakika ya da "none"
+news_blackout_minutes_after = ""   # ARMAN DOLDURUR — dakika ya da "none"
+algo_trading_allowed = ""          # ARMAN DOLDURUR — firmanın YAZILI algo/EA politikası (M0)

@@ -1,0 +1,20 @@
+# Seans tanımları. Yerel saat, IANA saat dilimi; DST chrono-tz ile.
+# Tatil/erken kapanışlar [[session.closure]] ile; UYDURULMAZ — CME resmi tatil takviminden
+# yıl yıl girilecek (OPEN_QUESTIONS #6). Girilmeyen tatiller veri kalite monitöründe "gap" olarak görünür.
+
+[[session]]
+name = "cme_globex"
+tz = "America/Chicago"
+open = "sun 17:00"
+close = "fri 16:00"
+daily_break = ["16:00", "17:00"]
+
+[[session]]
+name = "always"
+always = true
+
+[[session]]
+name = "fx_24x5"
+tz = "America/New_York"
+open = "sun 17:00"
+close = "fri 17:00"

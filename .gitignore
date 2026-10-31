@@ -1,0 +1,9 @@
+/target
+/var/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/data/store/
+/data/raw/
+.env
+atlas.env
