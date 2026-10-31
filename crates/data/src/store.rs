@@ -1,6 +1,6 @@
 //! Yerel bar deposu (ADR 0001): ay başına bir `.atb` dosyası + `manifest.json`.
 //!
-//! Dosya: `ATLASBAR` (8) | sürüm u32 | başlık uzunluğu u32 | başlık JSON | kayıtlar (64 bayt, LE).
+//! Dosya: `ATLASBAR` (8) | sürüm u32 | başlık uzunluğu u32 | başlık JSON | kayıtlar (72 bayt, LE).
 //! `DataVersion` = SHA-256(şema | sembol | tick | lot | kayıt baytları). Başlıktaki çekim zamanı vb.
 //! meta veriler hash'e girmez: aynı içerik = aynı versiyon.
 
@@ -13,8 +13,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const MAGIC: &[u8; 8] = b"ATLASBAR";
-pub const FORMAT_VERSION: u32 = 1;
-pub const BAR_RECORD_LEN: usize = 64;
+pub const FORMAT_VERSION: u32 = 2;
+pub const BAR_RECORD_LEN: usize = 72;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -88,6 +88,7 @@ pub fn encode_bar(b: &Bar, out: &mut Vec<u8>) {
     out.extend_from_slice(&b.low.0.to_le_bytes());
     out.extend_from_slice(&b.close.0.to_le_bytes());
     out.extend_from_slice(&b.volume.to_le_bytes());
+    out.extend_from_slice(&b.buy_volume.to_le_bytes());
     out.extend_from_slice(&b.trades.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
 }
@@ -121,7 +122,8 @@ pub fn decode_bar(r: &[u8]) -> Bar {
         low: Price(le_i64(r, 32)),
         close: Price(le_i64(r, 40)),
         volume: le_u64(r, 48),
-        trades: le_u32(r, 56),
+        buy_volume: le_u64(r, 56),
+        trades: le_u32(r, 64),
     }
 }
 
@@ -362,6 +364,7 @@ mod tests {
                 low: Price(95 + i as i64),
                 close: Price(101 + i as i64),
                 volume: 10 + i,
+                buy_volume: 0,
                 trades: 3,
             })
             .collect()

@@ -55,6 +55,9 @@ pub fn bars_from_trades(
                 b.low = b.low.min(t.price);
                 b.close = t.price;
                 b.volume += t.size;
+                if t.aggressor == Some(atlas_core::Side::Buy) {
+                    b.buy_volume += t.size;
+                }
                 b.trades += 1;
             }
             _ => {
@@ -69,6 +72,11 @@ pub fn bars_from_trades(
                     low: t.price,
                     close: t.price,
                     volume: t.size,
+                    buy_volume: if t.aggressor == Some(atlas_core::Side::Buy) {
+                        t.size
+                    } else {
+                        0
+                    },
                     trades: 1,
                 });
             }
@@ -76,6 +84,51 @@ pub fn bars_from_trades(
     }
     if let Some(b) = cur {
         out.push(MarketEvent::bar(inst, b));
+    }
+    out
+}
+
+/// Momentum içeren sentetik 1m barlar: getiri_t = φ·getiri_{t−1} + gürültü (yaklaşık normal, σ tick).
+/// φ = 0 → edge yok (rastgele yürüyüş); φ > 0 → trend takibine **bilinçli olarak yerleştirilmiş** edge.
+/// Gauntlet'in gücünü (gerçek edge'i geçirebilmesini) ölçmek için.
+pub fn ar_bars(
+    seed: u64,
+    n: usize,
+    start: UnixNanos,
+    phi: f64,
+    sigma_ticks: f64,
+    start_price: Price,
+) -> Vec<Bar> {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut normal = || (0..12).map(|_| rng.random::<f64>()).sum::<f64>() - 6.0;
+    let mut prev_ret = 0.0f64;
+    let mut close = start_price.0 as f64;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let ret = phi * prev_ret + sigma_ticks * normal();
+        prev_ret = ret;
+        let open = close;
+        close = (close + ret).max(10.0);
+        let wick = sigma_ticks * 0.5 * normal().abs();
+        let wick2 = sigma_ticks * 0.5 * normal().abs();
+        let o = open.round() as i64;
+        let c = close.round() as i64;
+        let h = (open.max(close) + wick).round() as i64;
+        let l = (open.min(close) - wick2).round().max(1.0) as i64;
+        let vol = 50 + (normal().abs() * 30.0) as u64;
+        let buy = if c >= o { vol * 6 / 10 } else { vol * 4 / 10 };
+        let open_ts = start.plus(i as u64 * 60_000_000_000);
+        out.push(Bar {
+            open_ts,
+            close_ts: open_ts.plus(60_000_000_000),
+            open: Price(o),
+            high: Price(h.max(o).max(c)),
+            low: Price(l.min(o).min(c)),
+            close: Price(c),
+            volume: vol,
+            buy_volume: buy,
+            trades: 10,
+        });
     }
     out
 }

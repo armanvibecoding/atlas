@@ -442,6 +442,7 @@ fn bar(i: u64, o: i64, h: i64, l: i64, c: i64) -> MarketEvent {
             low: Price(l),
             close: Price(c),
             volume: 1,
+            buy_volume: 0,
             trades: 1,
         },
     )

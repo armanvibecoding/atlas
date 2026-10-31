@@ -12,7 +12,7 @@
 #       NQ/MNQ: TradeStation ve Interactive Brokers ücret tabloları ($1.38 / $0.35)
 #       ES/MES/GC/MGC: Topstep ücret tablosu (2026; gidiş-dönüş $2.76/$0.70/$3.30/$1.40 → tek yön yarısı)
 #       CL: NexusFi 2026 başı tahmini ($1.42) — daha zayıf kaynak, ilk fırsatta CME Fee Finder'dan teyit
-# - slippage_ticks: kayma internetten teyit edilemez, ÖLÇÜLÜR (OPEN_QUESTIONS #6). Boşken sim hata verir.
+# - slippage_ticks: internetten teyit edilemez, ÖLÇÜLÜR. Binance: ölçüldü (1 tick). CME: veri yok, boş (sim hata verir).
 
 # ---- CME (tick değerleri: CME + birden çok aracı kurum sayfasıyla teyit, 2026-10-31) ----
 [[instrument]]
@@ -129,7 +129,7 @@ exposure_group = "crypto_btc"
 exposure_weight = "0.001"
 [instrument.costs]
 fee_rate_percent = "0.05"
-slippage_ticks = ""
+slippage_ticks = "1"   # ÖLÇÜLDÜ 2026-10-31: atlas data measure-slippage (aggTrades, 200 pencere/24 sa), yarım spread ort. yukarı yuvarlandı
 
 [[instrument]]
 symbol = "ETHUSDT"
@@ -143,4 +143,4 @@ exposure_group = "crypto_eth"
 exposure_weight = "0.001"
 [instrument.costs]
 fee_rate_percent = "0.05"
-slippage_ticks = ""
+slippage_ticks = "1"   # ÖLÇÜLDÜ 2026-10-31: atlas data measure-slippage (aggTrades, 200 pencere/24 sa), yarım spread ort. yukarı yuvarlandı

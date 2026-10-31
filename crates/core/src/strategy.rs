@@ -65,7 +65,7 @@ impl InstrumentHistory {
 #[derive(Debug, Clone, Default)]
 pub struct MarketHistory {
     per: BTreeMap<InstrumentId, InstrumentHistory>,
-    /// Enstrüman başına tutulacak en fazla bar (0 = sınırsız).
+    /// Enstrüman başına en az tutulacak bar (0 = sınırsız); tampon en fazla 2× bu kadar büyür.
     max_bars: usize,
     now: UnixNanos,
 }
@@ -90,9 +90,9 @@ impl MarketHistory {
         let h = self.per.entry(ev.instrument).or_default();
         match &ev.payload {
             MarketPayload::Bar(b) => {
-                if self.max_bars > 0 && h.bars.len() >= self.max_bars {
-                    let drop = h.bars.len() + 1 - self.max_bars;
-                    h.bars.drain(..drop);
+                // Amortize kırpma: tampon 2×max'a ulaşınca en eski max bar atılır (O(1) ortalama).
+                if self.max_bars > 0 && h.bars.len() >= 2 * self.max_bars {
+                    h.bars.drain(..self.max_bars);
                 }
                 h.bars.push(*b);
                 h.last_price = Some(b.close);
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn history_caps_bars_and_ignores_feed_for_price() {
-        let mut h = MarketHistory::new(2);
+        let mut h = MarketHistory::new(1);
         let i = InstrumentId(0);
         for k in 0..3u64 {
             h.push(&MarketEvent::bar(
@@ -204,6 +204,7 @@ mod tests {
                     low: Price(9),
                     close: Price(11 + k as i64),
                     volume: 1,
+                    buy_volume: 0,
                     trades: 1,
                 },
             ));

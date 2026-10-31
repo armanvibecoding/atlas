@@ -2,6 +2,7 @@
 //! Çıktı şeması: docs/cli-schema.md (`atlas.cli/1`).
 
 mod home;
+mod m2;
 mod verify;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -52,8 +53,26 @@ enum Cmd {
     },
     /// Kilometre taşı kabul testleri.
     Verify {
-        /// m1 (m2..m5 sonraki taşlarda).
+        /// m1 | m2
         milestone: String,
+        /// m2: sahte strateji testindeki aday sayısı (spec: 1000).
+        #[arg(long, default_value_t = 1000)]
+        fake_n: usize,
+    },
+    /// Gauntlet: adayı 10 kapıdan geçir (sicile yazılır, deneme sayılır).
+    Gauntlet {
+        #[command(subcommand)]
+        cmd: GauntletCmd,
+    },
+    /// Merdivendeki stratejiler.
+    Strategies {
+        #[command(subcommand)]
+        cmd: StrategiesCmd,
+    },
+    /// Deney sicili.
+    Experiments {
+        #[command(subcommand)]
+        cmd: ExperimentsCmd,
     },
     /// Journal işlemleri.
     Journal {
@@ -71,6 +90,35 @@ enum Cmd {
     KillReset { scope: String },
     /// Journal'a operatör notu (metin argümanda ya da stdin'de).
     Note { text: Vec<String> },
+}
+
+#[derive(Subcommand)]
+enum GauntletCmd {
+    /// Genom dosyası ya da strategies/<ad>.
+    Run {
+        genome: String,
+        /// Kaynak etiketi (insan | evrim | ajan-X/prompt-vN | referans).
+        #[arg(long, default_value = "insan")]
+        source: String,
+    },
+    /// Yalnız temel değerlendirme + süre (sicile yazmaz).
+    Eval {
+        genome: String,
+        /// Ücret ve kayma sıfır (teşhis: maliyet öncesi edge var mı?).
+        #[arg(long)]
+        frictionless: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum StrategiesCmd {
+    List,
+    Show { name: String },
+}
+
+#[derive(Subcommand)]
+enum ExperimentsCmd {
+    Summary,
 }
 
 #[derive(Subcommand)]
@@ -98,6 +146,17 @@ enum DataCmd {
         #[arg(long)]
         to: String,
     },
+    /// Binance işlem akışından efektif spread → önerilen kayma (ücretsiz ölçüm).
+    MeasureSlippage {
+        #[arg(long)]
+        symbol: String,
+        /// Son kaç gün (Binance aggTrades zaman araması en fazla son 2 gün).
+        #[arg(long, default_value_t = 1)]
+        days: u64,
+        /// 60 sn'lik örnek pencere sayısı.
+        #[arg(long, default_value_t = 200)]
+        windows: usize,
+    },
     /// Databento maliyet sorgusu + tavan kontrolü (indirme yapmaz).
     QuoteDatabento {
         #[arg(long, default_value = "GLBX.MDP3")]
@@ -122,11 +181,15 @@ fn guard_role(cmd: &Cmd) -> Result<()> {
         let forbidden = match cmd {
             Cmd::KillReset { .. } => Some("kill-reset"),
             Cmd::Data {
-                cmd: DataCmd::PullBinance { .. } | DataCmd::QuoteDatabento { .. },
+                cmd:
+                    DataCmd::PullBinance { .. }
+                    | DataCmd::QuoteDatabento { .. }
+                    | DataCmd::MeasureSlippage { .. },
             } => Some("data pull/quote"),
             Cmd::Journal {
                 cmd: JournalCmd::Checkpoint,
             } => Some("journal checkpoint"),
+            Cmd::Gauntlet { .. } => Some("gauntlet (holdout bütçesi ve deneme sayacı tüketir)"),
             _ => None,
         };
         if let Some(f) = forbidden {
@@ -223,7 +286,22 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
             kind,
             limit,
         } => events(&h, out, since, prio, kind, limit),
-        Cmd::Verify { milestone } => match milestone.as_str() {
+        Cmd::Gauntlet { cmd } => match cmd {
+            GauntletCmd::Run { genome, source } => m2::gauntlet_run(&h, out, &genome, &source),
+            GauntletCmd::Eval {
+                genome,
+                frictionless,
+            } => m2::gauntlet_eval(&h, out, &genome, frictionless),
+        },
+        Cmd::Strategies { cmd } => match cmd {
+            StrategiesCmd::List => m2::strategies_list(&h, out),
+            StrategiesCmd::Show { name } => m2::strategies_show(&h, out, &name),
+        },
+        Cmd::Experiments {
+            cmd: ExperimentsCmd::Summary,
+        } => m2::experiments_summary(&h, out),
+        Cmd::Verify { milestone, fake_n } => match milestone.as_str() {
+            "m2" => m2::verify_m2(&h, out, fake_n),
             "m1" => verify::m1(&h, out),
             other => bail!("{other}: henüz tanımlı değil (M1 aşamasındayız)"),
         },
@@ -507,6 +585,31 @@ fn data(h: &Home, out: &Out, cmd: DataCmd) -> Result<bool> {
                     s.trim_end().to_string()
                 },
             );
+            Ok(true)
+        }
+        DataCmd::MeasureSlippage {
+            symbol,
+            days,
+            windows,
+        } => {
+            let table = h.instruments()?;
+            let inst = table.get(&symbol).map_err(|e| anyhow!("{e}"))?;
+            let api = atlas_data::binance::BinanceFutures::new()?;
+            let rep = api.measure_spread(inst, now(), days, windows)?;
+            let mut j = open_journal(h)?;
+            j.append(&Event::new(
+                now(),
+                EventKind::Calibration,
+                json!({"kind": "slippage", "report": rep}),
+            ))?;
+            out.emit("data.measure_slippage", true, serde_json::to_value(&rep)?, || {
+                format!(
+                    "{}: {} örnek ({} pencere, {} → {})\n  spread medyan {:.2} tick, ort {:.3}, p90 {:.2}\n  yarım spread ort {:.3} tick → önerilen kayma {} tick",
+                    rep.symbol, rep.samples, rep.windows, rep.from, rep.to,
+                    rep.median_spread_ticks, rep.mean_spread_ticks, rep.p90_spread_ticks,
+                    rep.mean_half_spread_ticks, rep.recommended_slippage_ticks
+                )
+            });
             Ok(true)
         }
         DataCmd::QuoteDatabento {

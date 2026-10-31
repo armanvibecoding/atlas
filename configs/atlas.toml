@@ -3,6 +3,7 @@
 [paths]
 journal = "var/journal.sqlite"
 store = "var/data"
+registry = "var/registry.sqlite"
 
 [account]
 # Hedef prop config'i (configs/props altında). Boş alanları ARMAN doldurur.
@@ -26,3 +27,11 @@ consistency_headroom = "0.8"
 drawdown_near = "0.25"
 stop_slippage_buffer_ticks = 2
 min_minutes_before_week_close = 60
+
+# Gauntlet (§4.6). Spec varsayılanları geçerlidir; burada yalnız SIKILAŞTIRMA kabul edilir.
+# prop_pass_min / prop_bust_max eşikleri Arman'ındır — ÖNERİ, onay bekliyor (OPEN_QUESTIONS #13).
+[gauntlet]
+prop_pass_min = 0.50
+prop_bust_max = 0.20
+holdout_days = 90
+holdout_budget = 5

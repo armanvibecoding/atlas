@@ -112,6 +112,7 @@ event_kinds! {
     ConfigLoaded => "config_loaded", Info;
     DataPulled => "data_pulled", Info;
     DayRollover => "day_rollover", Info;
+    Calibration => "calibration", Info;
 }
 
 impl fmt::Display for EventKind {

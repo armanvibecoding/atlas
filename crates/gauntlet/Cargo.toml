@@ -1,0 +1,29 @@
+[package]
+name = "atlas-gauntlet"
+description = "Doğrulama: CPCV, walk-forward, DSR, PBO, stres, prop Monte Carlo, holdout; sahte strateji testi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_gauntlet"
+
+[dependencies]
+atlas-core.workspace = true
+atlas-risk.workspace = true
+atlas-sim.workspace = true
+atlas-features.workspace = true
+atlas-genome.workspace = true
+atlas-registry.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+statrs.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+rayon.workspace = true
+
+[lints]
+workspace = true

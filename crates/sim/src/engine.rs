@@ -38,6 +38,9 @@ pub struct SimConfig {
     pub latency_ns: u64,
     /// Saklanacak en fazla red olayı (sayılar her zaman tam tutulur).
     pub max_rejection_events: usize,
+    /// `false`: pozisyon açılış/kapanış olay yükleri kurulmaz (yalnız araştırma/gauntlet hızı için;
+    /// işlem kayıtları ve risk olayları aynen üretilir).
+    pub record_position_events: bool,
 }
 
 impl Default for SimConfig {
@@ -49,6 +52,7 @@ impl Default for SimConfig {
             slippage_override: None,
             latency_ns: 0,
             max_rejection_events: 1000,
+            record_position_events: true,
         }
     }
 }
@@ -147,8 +151,7 @@ struct AccountAdapter<'a> {
 impl AccountView for AccountAdapter<'_> {
     fn position(&self, strategy: &StrategyId, inst: InstrumentId) -> Option<PositionView> {
         self.state
-            .positions()
-            .get(&(strategy.clone(), inst))
+            .position_of(strategy, inst)
             .map(|p| PositionView {
                 side: p.side,
                 qty: p.qty,
@@ -158,7 +161,7 @@ impl AccountView for AccountAdapter<'_> {
             })
     }
     fn has_pending_entry(&self, strategy: &StrategyId, inst: InstrumentId) -> bool {
-        self.state.pending().contains_key(&(strategy.clone(), inst))
+        self.state.has_pending_of(strategy, inst)
     }
     fn equity(&self) -> Money {
         self.state.equity(self.env)
@@ -203,6 +206,7 @@ pub struct Engine<'g> {
     seq: u64,
     last_ts: UnixNanos,
     rejection_events_stored: usize,
+    ids: Vec<StrategyId>,
     result: SimResult,
 }
 
@@ -213,7 +217,8 @@ impl<'g> Engine<'g> {
         cfg: SimConfig,
         start: UnixNanos,
     ) -> Self {
-        let state = RiskState::new(&gate.env, start);
+        let mut state = RiskState::new(&gate.env, start);
+        state.quiet = !cfg.record_position_events;
         let start_balance = state.balance;
         Engine {
             gate,
@@ -230,6 +235,7 @@ impl<'g> Engine<'g> {
             seq: 0,
             last_ts: start,
             rejection_events_stored: 0,
+            ids: Vec::new(),
             result: SimResult {
                 fill_model: format!("{}@v{}", model.name(), model.version()),
                 start_balance,
@@ -359,21 +365,18 @@ impl<'g> Engine<'g> {
     }
 
     fn match_event(&mut self, ev: &MarketEvent, slip: i64) -> Result<(), SimError> {
-        let triggers = {
-            let active: Vec<&WorkingOrder> = self
-                .orders
-                .values()
-                .filter(|o| {
-                    o.instrument == ev.instrument
-                        && o.created_seq < self.seq
-                        && o.active_from <= ev.ts
-                })
-                .collect();
-            if active.is_empty() {
-                return Ok(());
-            }
-            self.model.match_orders(ev, &active, slip, BarScope::Full)
-        };
+        let seq = self.seq;
+        let triggers: Vec<Trigger> = self
+            .orders
+            .values()
+            .filter(|o| {
+                o.instrument == ev.instrument && o.created_seq < seq && o.active_from <= ev.ts
+            })
+            .filter_map(|o| self.model.match_one(ev, o, slip, BarScope::Full))
+            .collect();
+        if triggers.is_empty() {
+            return Ok(());
+        }
         for t in self.resolve_oco(triggers) {
             self.execute(ev, t, slip)?;
         }
@@ -465,7 +468,9 @@ impl<'g> Engine<'g> {
         };
         let evs = self.state.on_fill(self.env(), &fill);
         self.push_events(evs);
-        self.result.fills.push(fill);
+        if self.cfg.record_position_events {
+            self.result.fills.push(fill);
+        }
         let key = (o.strategy.clone(), o.instrument);
 
         if o.role == Role::Entry {
@@ -652,9 +657,11 @@ impl<'g> Engine<'g> {
                 env,
             };
             let sess = SessionAdapter { env };
-            for s in strategies.iter_mut() {
-                let id = s.id().clone();
-                let ctx = Ctx::new(&id, &self.history, &acct, &sess);
+            if self.ids.len() != strategies.len() {
+                self.ids = strategies.iter().map(|s| s.id().clone()).collect();
+            }
+            for (s, id) in strategies.iter_mut().zip(self.ids.iter()) {
+                let ctx = Ctx::new(id, &self.history, &acct, &sess);
                 for mut i in s.on_event(&ctx, ev) {
                     // Strateji başkası adına ya da başka zamanda niyet üretemez.
                     i.strategy = id.clone();

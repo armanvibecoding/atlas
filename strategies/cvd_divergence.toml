@@ -1,0 +1,17 @@
+# CVD uyumsuzluğu: fiyat 30 barlık dibi yenilerken kümülatif delta yenilemiyor ve bar yeşil → long (tersi short).
+name = "cvd_divergence"
+instrument = "BTCUSDT"
+tags = ["referans", "orderflow"]
+
+[entry]
+long = { all = [ { gt = ["cvd_div_bull:30", 0.5] }, { gt = ["close", "open"] } ] }
+short = { all = [ { gt = ["cvd_div_bear:30", 0.5] }, { lt = ["close", "open"] } ] }
+
+[exit]
+atr = 14
+stop_atr = 1.0
+target_r = 2.0
+time_bars = 60
+
+[sizing]
+risk_usd = 1000

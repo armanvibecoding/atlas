@@ -19,7 +19,18 @@ pub struct Bar {
     pub close: Price,
     /// Lot cinsinden hacim.
     pub volume: u64,
+    /// Alıcı-agresör (taker buy) hacmi, lot. Kaynak vermiyorsa 0 ve `volume`'dan bağımsızdır.
+    pub buy_volume: u64,
     pub trades: u32,
+}
+
+impl Bar {
+    /// Bar deltası: alıcı-agresör − satıcı-agresör hacmi (lot).
+    pub fn delta(&self) -> i64 {
+        let b = i64::try_from(self.buy_volume).unwrap_or(i64::MAX);
+        let v = i64::try_from(self.volume).unwrap_or(i64::MAX);
+        2 * b - v
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

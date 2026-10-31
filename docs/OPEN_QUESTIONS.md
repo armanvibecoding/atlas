@@ -64,3 +64,24 @@ config doldurulurken teyit.
 ### 12. Hafta sonu kapatma öncesi süre
 Hafta sonu tutma yasaksa pozisyonlar haftalık kapanıştan **5 dk önce** piyasa emriyle kapanır (sabit,
 `WEEKEND_FLATTEN_LEAD_MIN`). Yeni giriş yasağı politika ile (öneri 60 dk).
+
+## M2'de eklenenler
+
+### 13. Prop Monte Carlo eşikleri (kapı 9) — **onay bekliyor**
+Spec: "eşikler Arman'ın". Öneri (`atlas.toml [gauntlet]`): geçme olasılığı ≥ **%50**, patlama olasılığı ≤ **%20**,
+120 işlem günü ufkunda, genel 100k kuralları ile. MC gün içi açık-pozisyon dalgalanmasını görmez (iyimser);
+eşikler bunu telafi edecek kadar sıkı tutuldu.
+
+### 14. Journal ileri uyumluluğu
+Yeni bir olay türü (ör. `calibration`) yazıldıktan sonra **eski** binary journal'ı açamaz (bilinmeyen tür = bozuk
+kayıt sayılır, sessiz atlama yok). Kural: deploy'da önce yeni binary, sonra yeni olay türleri. M3 deploy betiği bunu uygular.
+
+### 15. Ücret bulgusu (karar değil, bilgi)
+1m BTC'de 1–1.5 ATR stop ≈ %0.12 fiyat hareketi; gidiş-dönüş taker ücreti %0.10 → riskin ~%85'i. Referans
+stratejilerin üçü maliyetsiz pozitif ama maliyetle −1.4R…−2.2R. M3 araması bu yüzden (a) daha geniş stop/uzun
+vade, (b) limit emir (maker %0.02) girişlerini öncelemeli. Sahte strateji testi gerçek maliyetle "kolay"
+(gürültü ücretle ölüyor); asıl ölçü sürtünmesiz varyant (o da 0/1000).
+
+### 16. Spec sapması: performans ölçümü
+Spec "2 yıl NQ 1m < 200 ms" diyor; NQ verisi yok (M0). Ölçüm BTCUSDT 921 bin barda yapıldı (~215 ms) ve NQ 2 yıl
+bar sayısına (≈717 bin) oranlandı (~167 ms). NQ verisi gelince doğrudan ölçülecek.

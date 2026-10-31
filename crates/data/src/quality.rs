@@ -119,6 +119,7 @@ mod tests {
             low: Price(9),
             close: Price(10),
             volume: vol,
+            buy_volume: 0,
             trades: 1,
         }
     }

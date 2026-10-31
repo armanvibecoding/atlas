@@ -1,0 +1,17 @@
+# Trend + geri çekilme: EMA50 > EMA200 iken fitil EMA50'ye değip üstünde kapanırsa long (tersi short).
+name = "trend_pullback"
+instrument = "BTCUSDT"
+tags = ["referans", "trend"]
+
+[entry]
+long = { all = [ { gt = ["ema:50", "ema:200"] }, { lt = ["low", "ema:50"] }, { gt = ["close", "ema:50"] } ] }
+short = { all = [ { lt = ["ema:50", "ema:200"] }, { gt = ["high", "ema:50"] }, { lt = ["close", "ema:50"] } ] }
+
+[exit]
+atr = 14
+stop_atr = 1.5
+target_r = 2.0
+time_bars = 240
+
+[sizing]
+risk_usd = 1000

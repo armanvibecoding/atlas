@@ -92,6 +92,15 @@ pub trait FillModel {
     /// Kalibrasyon sürümü; deney kaydı bunu taşır (§4.4).
     fn version(&self) -> u32;
     fn handles(&self, payload: &MarketPayload) -> bool;
+    /// Tek emir bu olayla tetikleniyor mu? (Sıcak yol: bellek ayırmaz.)
+    fn match_one(
+        &self,
+        ev: &MarketEvent,
+        order: &WorkingOrder,
+        slippage_ticks: i64,
+        scope: BarScope,
+    ) -> Option<Trigger>;
+
     /// `orders` bu olayın enstrümanına ait, aktif emirlerdir. Tetiklenenleri döner.
     fn match_orders(
         &self,
@@ -99,7 +108,12 @@ pub trait FillModel {
         orders: &[&WorkingOrder],
         slippage_ticks: i64,
         scope: BarScope,
-    ) -> Vec<Trigger>;
+    ) -> Vec<Trigger> {
+        orders
+            .iter()
+            .filter_map(|o| self.match_one(ev, o, slippage_ticks, scope))
+            .collect()
+    }
 }
 
 /// Bir yön için kaymayı uygula (her zaman aleyhte).
@@ -177,20 +191,17 @@ impl FillModel for BarFill {
     fn handles(&self, payload: &MarketPayload) -> bool {
         matches!(payload, MarketPayload::Bar(_))
     }
-    fn match_orders(
+    fn match_one(
         &self,
         ev: &MarketEvent,
-        orders: &[&WorkingOrder],
+        o: &WorkingOrder,
         s: i64,
         scope: BarScope,
-    ) -> Vec<Trigger> {
+    ) -> Option<Trigger> {
         let MarketPayload::Bar(b) = &ev.payload else {
-            return Vec::new();
+            return None;
         };
-        orders
-            .iter()
-            .filter_map(|o| self.one(b, o, s, scope))
-            .collect()
+        self.one(b, o, s, scope)
     }
 }
 
@@ -238,21 +249,20 @@ impl FillModel for TradeFill {
     fn handles(&self, payload: &MarketPayload) -> bool {
         matches!(payload, MarketPayload::Trade(_))
     }
-    fn match_orders(
+    fn match_one(
         &self,
         ev: &MarketEvent,
-        orders: &[&WorkingOrder],
+        o: &WorkingOrder,
         s: i64,
         _scope: BarScope,
-    ) -> Vec<Trigger> {
+    ) -> Option<Trigger> {
         let MarketPayload::Trade(tr) = &ev.payload else {
-            return Vec::new();
+            return None;
         };
-        orders
-            .iter()
-            .filter(|o| o.active_from <= ev.ts)
-            .filter_map(|o| self.one(tr, o, s))
-            .collect()
+        if o.active_from > ev.ts {
+            return None;
+        }
+        self.one(tr, o, s)
     }
 }
 
@@ -271,6 +281,7 @@ mod tests {
                 low: Price(l),
                 close: Price(c),
                 volume: 1,
+                buy_volume: 0,
                 trades: 1,
             },
         )

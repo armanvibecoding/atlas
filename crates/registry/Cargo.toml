@@ -1,0 +1,19 @@
+[package]
+name = "atlas-registry"
+description = "Deney sicili, deneme sayacı, bilgi tabanı, holdout erişim kaydı"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_registry"
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

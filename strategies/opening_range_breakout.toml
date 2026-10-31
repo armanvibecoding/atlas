@@ -1,0 +1,21 @@
+# Açılış aralığı kırılımı: işlem gününün (UTC) ilk 30 dakikasının tepesi/dibi kırılınca giriş, günde 1 işlem.
+name = "opening_range_breakout"
+instrument = "BTCUSDT"
+tags = ["referans", "kırılım"]
+
+[entry]
+long = { cross_above = ["close", "or_high:30"] }
+short = { cross_below = ["close", "or_low:30"] }
+
+[filters]
+hours_utc = [0, 12]
+max_trades_per_day = 1
+
+[exit]
+atr = 14
+stop_atr = 1.5
+target_r = 2.0
+time_bars = 240
+
+[sizing]
+risk_usd = 1000

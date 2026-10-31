@@ -1,0 +1,18 @@
+[package]
+name = "atlas-features"
+description = "Zaman noktalı feature store + lookahead dedektörü"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "atlas_features"
+
+[dependencies]
+atlas-core.workspace = true
+serde.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

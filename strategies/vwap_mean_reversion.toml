@@ -1,0 +1,17 @@
+# VWAP ortalamaya dönüş: fiyat günlük VWAP'ın 2 ATR altına inince long, üstüne çıkınca short.
+name = "vwap_mean_reversion"
+instrument = "BTCUSDT"
+tags = ["referans", "ortalamaya-dönüş"]
+
+[entry]
+long = { lt = ["close", { sub = ["vwap", { mul = ["atr:14", 2.0] }] }] }
+short = { gt = ["close", { add = ["vwap", { mul = ["atr:14", 2.0] }] }] }
+
+[exit]
+atr = 14
+stop_atr = 1.5
+target_r = 1.5
+time_bars = 120
+
+[sizing]
+risk_usd = 1000

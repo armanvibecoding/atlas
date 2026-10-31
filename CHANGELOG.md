@@ -1,5 +1,34 @@
 # Değişiklik günlüğü
 
+## M2 — Doğruluk makinesi (2026-10-31)
+
+### Eklendi
+- **features**: 32 feature türü (ATR, EMA/SMA, RSI, VWAP, CVD, delta, imbalance, absorption, PDH/PDL,
+  Asya/Londra aralığı, açılış aralığı, hacim profili POC/VAH/VAL, sweep, CVD uyumsuzluğu, highest/lowest…),
+  `available_at` damgalı sütunlar, (veri versiyonu × feature) önbelleği, lookahead dedektörü.
+- **genome**: TOML strateji DSL'i, derleyici (`GenomeStrategy`, paylaşılan sütun ya da canlı mod),
+  rastgele genom, mutasyon, çaprazlama, budama, parametre komşuluğu, yapısal mesafe.
+- **registry**: append-only deney sicili, geri alınamaz deneme sayacı, ders (otopsi) tablosu, benzer ölü fikir
+  sorgusu, holdout erişim bütçesi.
+- **gauntlet**: 10 kapının tamamı (örneklem, purged+embargoed CPCV, walk-forward, Deflated Sharpe, PBO/CSCV,
+  parametre stabilitesi, maliyet stresi, rejim kırılımı, prop Monte Carlo, holdout), `GauntletReport` (JSON +
+  Markdown), sahte strateji testi (paralel, deterministik).
+- **5 referans strateji** (`strategies/`): trend_pullback, sweep_mss, vwap_mean_reversion,
+  opening_range_breakout, cvd_divergence.
+- **CLI**: `gauntlet run|eval [--frictionless]`, `strategies list|show`, `experiments summary`, `verify m2`,
+  `data measure-slippage`.
+- **Kalibrasyon**: Binance kayması ölçüldü (aggTrades, yarım spread) → BTCUSDT/ETHUSDT 1 tick.
+- **Veri**: depolama formatı v2 (taker alış hacmi); BTCUSDT + ETHUSDT yeniden çekildi.
+
+### Doğrulama
+- `verify m2`: 10/10 YEŞİL. Sahte strateji testi 1000 aday, gerçek maliyetle 0 geçen; sürtünmesiz 0 geçen
+  (kapı 1: 407, 2: 193, 3: 211, 4/DSR: 189).
+- Güç testi (CI): bilinçli yerleştirilmiş momentum edge'i 10 kapıyı geçiyor, aynı genom gürültüde 2. kapıda ölüyor.
+- Referanslar (BTCUSDT 1m, in-sample 921 bin bar): beşi de kapı 2'de düştü. Maliyetsiz beklentiler
+  trend_pullback +0.057R, cvd_divergence +0.054R, vwap_mean_reversion +0.033R; gerçek taker ücreti işlem başına
+  ~0.85–1.3R → 1m BTC'de dar stop + piyasa emri yapısal olarak kaybettiriyor.
+- `verify m1` 24/24 yeşil kaldı. 104 test, clippy temiz.
+
 ## M1 — Temel (2026-10-31, devam)
 
 ### Eklendi

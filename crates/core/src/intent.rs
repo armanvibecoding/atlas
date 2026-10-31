@@ -40,13 +40,17 @@ impl Side {
     }
 }
 
+/// Strateji kimliği. `Arc<str>`: sıcak yolda kopyalamak ucuz (yalnız sayaç artar).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct StrategyId(pub String);
+pub struct StrategyId(pub std::sync::Arc<str>);
 
 impl StrategyId {
-    pub fn new(s: impl Into<String>) -> Self {
-        StrategyId(s.into())
+    pub fn new(s: impl AsRef<str>) -> Self {
+        StrategyId(std::sync::Arc::from(s.as_ref()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 

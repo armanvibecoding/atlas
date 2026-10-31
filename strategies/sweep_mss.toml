@@ -1,0 +1,18 @@
+# Likidite süpürmesi + yapı kırılımı (MSS): önceki bar 60 barlık dibi süpürüp içeride kapandı,
+# bu bar son 5 barın tepesini kırıyor → long (tersi short).
+name = "sweep_mss"
+instrument = "BTCUSDT"
+tags = ["referans", "likidite"]
+
+[entry]
+long = { all = [ { gt = ["sweep_low:60@1", 0.5] }, { gt = ["close", "highest:5"] } ] }
+short = { all = [ { gt = ["sweep_high:60@1", 0.5] }, { lt = ["close", "lowest:5"] } ] }
+
+[exit]
+atr = 14
+stop_atr = 1.0
+target_r = 2.0
+time_bars = 120
+
+[sizing]
+risk_usd = 1000

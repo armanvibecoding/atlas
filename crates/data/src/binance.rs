@@ -200,6 +200,13 @@ pub fn parse_kline(r: &serde_json::Value, inst: &Instrument) -> Result<Bar, Bina
             inst.symbol, inst.lot_size
         )));
     }
+    let buy = Fixed9::parse(str_field(r, 9)?).map_err(|e| BinanceError::Parse(e.to_string()))?;
+    if buy.0 % inst.lot_size.0 != 0 || buy.0 > vol.0 {
+        return Err(BinanceError::Parse(format!(
+            "{}: taker alış hacmi {buy} geçersiz",
+            inst.symbol
+        )));
+    }
     let trades = field(r, 8)?
         .as_u64()
         .ok_or_else(|| BinanceError::Parse("trades".into()))?;
@@ -212,8 +219,107 @@ pub fn parse_kline(r: &serde_json::Value, inst: &Instrument) -> Result<Bar, Bina
         low: px(3)?,
         close: px(4)?,
         volume: u64::try_from(vol.0 / inst.lot_size.0).unwrap_or(0),
+        buy_volume: u64::try_from(buy.0 / inst.lot_size.0).unwrap_or(0),
         trades: u32::try_from(trades).unwrap_or(u32::MAX),
     })
+}
+
+/// Ölçülmüş efektif spread ve önerilen kayma (§4.4 kalibrasyon, OPEN_QUESTIONS #6).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SpreadReport {
+    pub symbol: String,
+    pub windows: usize,
+    pub samples: usize,
+    /// Agresör yönü değişen ardışık işlemler arası fiyat farkı (tick).
+    pub median_spread_ticks: f64,
+    pub mean_spread_ticks: f64,
+    pub p90_spread_ticks: f64,
+    /// Piyasa emrinin son işlem fiyatına göre beklenen maliyeti ≈ yarım spread.
+    pub mean_half_spread_ticks: f64,
+    /// Tamsayı tick'e yukarı yuvarlanmış öneri (karamsar).
+    pub recommended_slippage_ticks: i64,
+    pub from: String,
+    pub to: String,
+}
+
+impl BinanceFutures {
+    /// `aggTrades` örneklemesiyle efektif spread ölçer. `windows` adet 60 sn'lik pencere, son
+    /// `days` güne eşit aralıklı yayılır (deterministik zamanlar).
+    pub fn measure_spread(
+        &self,
+        inst: &Instrument,
+        now: UnixNanos,
+        days: u64,
+        windows: usize,
+    ) -> Result<SpreadReport, BinanceError> {
+        let span_ms = days.saturating_mul(86_400_000);
+        let end_ms = (now.0 / 1_000_000).saturating_sub(120_000);
+        let start_ms = end_ms.saturating_sub(span_ms);
+        let step = span_ms / windows.max(1) as u64;
+        let mut spreads: Vec<f64> = Vec::new();
+        for k in 0..windows {
+            let t0 = start_ms + step * k as u64;
+            let url = format!(
+                "{}/fapi/v1/aggTrades?symbol={}&startTime={}&endTime={}&limit=1000",
+                self.base,
+                inst.symbol,
+                t0,
+                t0 + 60_000
+            );
+            let v = self.get_json(&url)?;
+            let rows = v
+                .as_array()
+                .ok_or_else(|| BinanceError::Parse("aggTrades dizi değil".into()))?;
+            let mut prev: Option<(i64, bool, u64)> = None;
+            for r in rows {
+                let p = r
+                    .get("p")
+                    .and_then(|x| x.as_str())
+                    .ok_or_else(|| BinanceError::Parse("aggTrades p".into()))?;
+                let px = inst
+                    .parse_price(p)
+                    .map_err(|e| BinanceError::Parse(e.to_string()))?
+                    .0;
+                let maker = r
+                    .get("m")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let t = r.get("T").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                if let Some((pp, pm, pt)) = prev
+                    && pm != maker
+                    && t.saturating_sub(pt) <= 1_000
+                {
+                    // m=true: alıcı maker → satıcı agresör (bid'de işlem).
+                    let (bid, ask) = if maker { (px, pp) } else { (pp, px) };
+                    let s = ask - bid;
+                    if s >= 0 {
+                        spreads.push(s as f64);
+                    }
+                }
+                prev = Some((px, maker, t));
+            }
+            std::thread::sleep(self.pause);
+        }
+        if spreads.is_empty() {
+            return Err(BinanceError::Parse("spread örneği yok".into()));
+        }
+        spreads.sort_by(f64::total_cmp);
+        let q = |f: f64| spreads[((spreads.len() - 1) as f64 * f).round() as usize];
+        let mean = spreads.iter().sum::<f64>() / spreads.len() as f64;
+        let half = mean / 2.0;
+        Ok(SpreadReport {
+            symbol: inst.symbol.clone(),
+            windows,
+            samples: spreads.len(),
+            median_spread_ticks: q(0.5),
+            mean_spread_ticks: mean,
+            p90_spread_ticks: q(0.9),
+            mean_half_spread_ticks: half,
+            recommended_slippage_ticks: (half.ceil() as i64).max(1),
+            from: format_utc(UnixNanos::from_millis(start_ms)),
+            to: format_utc(UnixNanos::from_millis(end_ms)),
+        })
+    }
 }
 
 pub fn parse_month(s: &str) -> Result<NaiveDate, BinanceError> {
@@ -328,6 +434,8 @@ session = "always"
         assert_eq!(b.open, atlas_core::Price(774_938));
         assert_eq!(b.low, atlas_core::Price(774_937));
         assert_eq!(b.volume, 12_767);
+        assert_eq!(b.buy_volume, 6_672);
+        assert_eq!(b.delta(), 2 * 6_672 - 12_767);
         assert_eq!(b.trades, 344);
         assert_eq!(b.close_ts.since(b.open_ts), NANOS_PER_MIN);
     }

@@ -33,6 +33,15 @@ impl RiskEnv {
         shifted.date()
     }
 
+    /// Firma gününün UTC sınırları [başlangıç, bitiş).
+    pub fn day_bounds(&self, day: NaiveDate) -> (UnixNanos, UnixNanos) {
+        let m = self.rules.day_reset_time.0;
+        let tz = self.rules.day_reset_tz;
+        let start = atlas_core::calendar::local_to_utc(day, m, tz);
+        let end = atlas_core::calendar::local_to_utc(day + chrono::Duration::days(1), m, tz);
+        (start, end)
+    }
+
     fn rules_local_minute(&self, ts: UnixNanos) -> u32 {
         let l = to_utc(ts).with_timezone(&self.rules.rules_tz).naive_local();
         l.time().num_seconds_from_midnight() / 60
@@ -149,6 +158,14 @@ pub struct RiskState {
     breached: bool,
     /// Günlük zarar limiti o gün için bir kez raporlanır.
     daily_limit_hit: Option<NaiveDate>,
+    /// Önbellek: geçerli firma gününün kapsadığı [başlangıç, bitiş) aralığı (saat dilimi çevrimi
+    /// her olayda yapılmasın diye).
+    #[serde(skip)]
+    day_window: Option<(UnixNanos, UnixNanos)>,
+    /// Araştırma koşuları: `position_opened/closed` olay yükleri kurulmaz (hesap aynen işler).
+    /// Risk olayları (ihlal, kill, limit) her zaman üretilir. Canlı/paper'da daima `false`.
+    #[serde(skip)]
+    pub quiet: bool,
 }
 
 impl RiskState {
@@ -174,6 +191,8 @@ impl RiskState {
             near_alerted: None,
             breached: false,
             daily_limit_hit: None,
+            day_window: None,
+            quiet: false,
         }
     }
 
@@ -262,6 +281,18 @@ impl RiskState {
         i128::from(max_day.0) * 1000 <= i128::from(total.0) * i128::from(r)
     }
 
+    /// Ayırma yapmadan (String kopyası olmadan) pozisyon arar.
+    pub fn position_of(&self, s: &StrategyId, i: InstrumentId) -> Option<&OpenPosition> {
+        self.positions
+            .iter()
+            .find(|((s2, i2), _)| *i2 == i && s2 == s)
+            .map(|(_, p)| p)
+    }
+
+    pub fn has_pending_of(&self, s: &StrategyId, i: InstrumentId) -> bool {
+        self.pending.keys().any(|(s2, i2)| *i2 == i && s2 == s)
+    }
+
     pub fn has_exposure(&self, s: &StrategyId, i: InstrumentId) -> bool {
         let k = (s.clone(), i);
         self.positions.contains_key(&k) || self.pending.contains_key(&k)
@@ -333,14 +364,16 @@ impl RiskState {
                     opened: fill.ts,
                 },
             );
-            ev.push(Event::new(
-                fill.ts,
-                EventKind::PositionOpened,
-                serde_json::json!({
-                    "strategy": fill.strategy, "instrument": inst.symbol, "side": fill.side,
-                    "qty": fill.qty, "price": fill.price, "stop": stop, "fee": fill.fee,
-                }),
-            ));
+            if !self.quiet {
+                ev.push(Event::new(
+                    fill.ts,
+                    EventKind::PositionOpened,
+                    serde_json::json!({
+                        "strategy": fill.strategy, "instrument": inst.symbol, "side": fill.side,
+                        "qty": fill.qty, "price": fill.price, "stop": stop, "fee": fill.fee,
+                    }),
+                ));
+            }
         } else if let Some(pos) = self.positions.remove(&key) {
             let realized = inst.pnl(pos.entry, fill.price, atlas_core::Qty(pos.signed()));
             self.balance += realized;
@@ -349,7 +382,8 @@ impl RiskState {
                 self.last_stop
                     .insert((fill.strategy.clone(), fill.instrument, pos.side), fill.ts);
             }
-            ev.push(Event::new(
+            if !self.quiet {
+                ev.push(Event::new(
                 fill.ts,
                 EventKind::PositionClosed,
                 serde_json::json!({
@@ -358,6 +392,7 @@ impl RiskState {
                     "gross": realized, "fee": fill.fee,
                 }),
             ));
+            }
         } else {
             ev.push(Event::new(
                 fill.ts,
@@ -391,7 +426,14 @@ impl RiskState {
             self.now = ts;
         }
         let equity = self.equity(env);
-        let today = env.day_id(self.now);
+        let today = match (self.day, self.day_window) {
+            (Some(d), Some((a, b))) if self.now >= a && self.now < b => d,
+            _ => {
+                let d = env.day_id(self.now);
+                self.day_window = Some(env.day_bounds(d));
+                d
+            }
+        };
         if self.day != Some(today) {
             if let Some(prev) = self.day {
                 let profit = equity - self.day_start_balance;

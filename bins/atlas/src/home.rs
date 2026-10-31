@@ -19,6 +19,12 @@ pub struct AtlasToml {
 pub struct Paths {
     pub journal: String,
     pub store: String,
+    #[serde(default = "default_registry")]
+    pub registry: String,
+}
+
+fn default_registry() -> String {
+    "var/registry.sqlite".into()
 }
 
 #[derive(Debug, Deserialize)]
