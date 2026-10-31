@@ -530,6 +530,8 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
         "approvals list",
         "report daily",
         "strategy pause yok-boyle-strateji test",
+        "trade list",
+        "market",
     ];
     let forbidden = [
         "approve 1",
@@ -705,8 +707,35 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
                 0,
             )?;
         }
+        // Grok operatör hesabı (ADR 0010): bir alış emri — daemon uygulamalı, risk kapısından geçirip
+        // doldurmalı ve hesap görüntüsüne yansıtmalı. Stop çok uzakta: adet küçük, risk tavanın altında.
+        opts.grok_snapshot = Some(dir.join("grok_account.json"));
+        opts.market_snapshot = Some(dir.join("market.json"));
+        {
+            let mut j = atlas_journal::Journal::open(&opts.journal)?;
+            let order = atlas_exec::manual::ManualOrder::Open {
+                side: atlas_core::Side::Buy,
+                qty: 1,
+                limit: None,
+                stop: atlas_core::Price(1),
+                target: None,
+                expiry_min: None,
+                reason: "verify m3 grok hesabı".into(),
+            };
+            j.append(&Event::new(
+                now(),
+                EventKind::GrokOrder,
+                json!({"account": "grok", "order": order, "by": "verify"}),
+            ))?;
+        }
         let t0 = std::time::Instant::now();
         let s = daemon::run(h, &opts)?;
+        let grok: serde_json::Value = std::fs::read_to_string(dir.join("grok_account.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let grok_ok = grok["orders"][0]["status"] == "filled" && grok["position"].is_object();
+        let market_ok = dir.join("market.json").is_file();
         let j = atlas_journal::Journal::open(&opts.journal)?;
         let rp = j.replay()?;
         let reg = Registry::open(&opts.registry)?;
@@ -714,8 +743,11 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
         let got = received.load(std::sync::atomic::Ordering::SeqCst);
         let detail = json!({"summary": s, "seconds": t0.elapsed().as_secs_f64(), "webhook_received": got,
             "journal_consistent": rp.consistent(), "journal_events": rp.events, "trials": trials,
-            "market_hours": replay_days * 24});
+            "market_hours": replay_days * 24, "grok_order_filled": grok_ok, "market_snapshot": market_ok,
+            "grok_orders": grok["orders"]});
         let pass = s.outbox.2 == 0
+            && grok_ok
+            && market_ok
             && s.engine_failures == 0
             && rp.consistent()
             && trials > 1

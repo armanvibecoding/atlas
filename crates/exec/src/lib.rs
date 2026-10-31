@@ -11,6 +11,8 @@
 //! Executor ayrımı: gölge ve paper aynı simüle borsayı (BarFill) kullanır; fark terfi kriteri ve
 //! kayıttır. Gerçek borsa executor'ı (Rithmic/Tradovate/MT5) M5'te bu arayüzün arkasına gelir.
 
+pub mod manual;
+
 use atlas_core::units::NANOS_PER_MIN;
 use atlas_core::{
     Bar, Ctx, Event, EventKind, FeedStatus, InstrumentId, Intent, MarketEvent, MarketPayload,

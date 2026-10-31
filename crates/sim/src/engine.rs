@@ -258,6 +258,11 @@ impl Engine {
         &self.state
     }
 
+    /// Risk ortamı (prop kuralları, politika, enstrümanlar) — salt okunur.
+    pub fn gate_env(&self) -> &atlas_risk::RiskEnv {
+        &self.gate.env
+    }
+
     /// Haber zamanları vb. dış durumu ayarlamak için.
     /// Biriken olayları alır (canlı koşucu her adımda boşaltır).
     pub fn drain_events(&mut self) -> Vec<Event> {

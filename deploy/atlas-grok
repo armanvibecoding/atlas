@@ -23,7 +23,8 @@ done
 
 c0="$1"; c1="${2:-}"
 case "$c0" in
-  status|health|events|budget|note|kill) ;;
+  status|health|events|budget|note|kill|market) ;;
+  trade)       [[ "$c1" =~ ^(open|close|cancel|list)$ ]] || deny "trade open|close|cancel|list" ;;
   experiments) [[ "$c1" == "summary" ]] || deny "experiments summary" ;;
   verify)      [[ "$c1" =~ ^m[1-5]$ ]] || deny "verify m1..m5" ;;
   report)      [[ "$c1" == "daily" || "$c1" == "weekly" ]] || deny "report daily|weekly" ;;

@@ -46,6 +46,22 @@ pub struct ReadCommand {
 /// 501 + `unavailable: true` döner, panel "henüz yok" gösterir.
 pub const READ_COMMANDS: &[ReadCommand] = &[
     ReadCommand {
+        route: "trade/list",
+        argv: &["trade", "list"],
+        param: Param::None,
+        query: QuerySpec::None,
+        milestone: "Grok",
+        title: "Grok hesabı",
+    },
+    ReadCommand {
+        route: "market",
+        argv: &["market"],
+        param: Param::None,
+        query: QuerySpec::None,
+        milestone: "Grok",
+        title: "Piyasa özeti",
+    },
+    ReadCommand {
         route: "status",
         argv: &["status"],
         param: Param::None,
@@ -157,6 +173,12 @@ pub const EXCLUDED: &[(&str, &str)] = &[
     ("kill", "yazma: kill switch tetikler"),
     ("kill-reset", "yazma, yalnız Arman"),
     ("webhook-test", "dış teslim (webhook POST), yalnız Arman"),
+    ("trade open", "yazma: Grok hesabına emir"),
+    ("trade close", "yazma: Grok hesabında pozisyon kapatır"),
+    (
+        "trade cancel",
+        "yazma: Grok hesabında bekleyen girişi iptal eder",
+    ),
     ("note", "yazma: journal'a operatör notu"),
     (
         "strategy",

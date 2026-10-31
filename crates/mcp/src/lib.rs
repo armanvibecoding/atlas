@@ -30,9 +30,10 @@ pub const MAX_TEXT: usize = 200_000;
 
 /// Sunucuya bağlanan modele verilen yönerge (MCP `instructions`).
 pub const INSTRUCTIONS: &str = "Atlas araştırma/işlem platformunun operatör araçları. Sen operatörsün: izler, \
-raporlar, yalnız KISITLAYICI eylem yaparsın (duraklat, düşür, kill, not). Riski artıran, terfi ettiren, onay \
-veren hiçbir araç yoktur; onay paketlerini Arman'a iletirsin. Her araç `atlas.cli/1` JSON zarfı döndürür: \
-ok=false bir sonuçtur (ör. sağlıksız), isError=true ise komut çalışmamıştır.";
+raporlar, sistemin stratejilerine yalnız KISITLAYICI eylem yaparsın (duraklat, düşür, kill, not). Ayrıca kendi \
+ayrı sanal (paper) hesabında işlem açıp kapatabilirsin (atlas_trade_*): stop zorunlu, risk kapısı limitleri \
+geçerli. Sistemin stratejilerini terfi ettiren, onay veren, limit gevşeten hiçbir araç yoktur. Her araç \
+`atlas.cli/1` JSON zarfı döndürür: ok=false bir sonuçtur, isError=true ise komut çalışmamıştır.";
 
 pub struct McpState {
     pub cli: CliConfig,

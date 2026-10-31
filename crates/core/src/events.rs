@@ -114,6 +114,8 @@ event_kinds! {
     DayRollover => "day_rollover", Info;
     Calibration => "calibration", Info;
     ShadowSignal => "shadow_signal", Info;
+    GrokOrder => "grok_order", Info;
+    GrokOrderApplied => "grok_order_applied", Info;
     AgentCall => "agent_call", Info;
     AgentInvalidOutput => "agent_invalid_output", Info;
     SearchCycle => "search_cycle", Info;

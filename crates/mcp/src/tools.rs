@@ -53,6 +53,25 @@ fn id_reason() -> Value {
     })
 }
 
+fn reason_only() -> Value {
+    json!({
+        "type": "object",
+        "properties": {"reason": {"type": "string", "minLength": 3, "maxLength": 500}},
+        "required": ["reason"],
+        "additionalProperties": false,
+    })
+}
+
+/// Ondalık fiyat/miktar metni: yalnız rakam ve tek nokta.
+fn decimal<'a>(a: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
+    let t = text(a, key, 20)?;
+    let dots = t.chars().filter(|c| *c == '.').count();
+    if dots > 1 || t.starts_with('.') || !t.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return Err(bad(format!("'{key}' ondalık sayı olmalı (ör. 67250.5)")));
+    }
+    Ok(t)
+}
+
 /// Tüm araçlar (sıra = `tools/list` sırası).
 pub const TOOLS: &[Tool] = &[
     Tool {
@@ -208,6 +227,62 @@ pub const TOOLS: &[Tool] = &[
                 "additionalProperties": false,
             })
         },
+    },
+    Tool {
+        name: "atlas_market",
+        description: "Canlı piyasa özeti (BTCUSDT): son fiyat, 15m/1h/4h/24h değişim, 24 sa aralık, UTC gün VWAP, 1m/15m/1h barlar ve EMA20/50, ATR14. İşlem kararından önce çağır; age_s büyükse veri bayat.",
+        read_only: true,
+        slow: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {"bars": {"type": "integer", "minimum": 1, "maximum": 240, "default": 30, "description": "Gösterilecek son 1m bar sayısı"}},
+                "additionalProperties": false,
+            })
+        },
+    },
+    Tool {
+        name: "atlas_trades",
+        description: "Grok sanal hesabı: bakiye, equity, bugünkü PnL, açık pozisyon (stop, gerçekleşmemiş PnL), bekleyen giriş, emirlerin durumu (queued/applied/rejected/filled + red sebebi), son işlemler, limitler.",
+        read_only: true,
+        slow: false,
+        schema: empty,
+    },
+    Tool {
+        name: "atlas_trade_open",
+        description: "Grok sanal hesabında pozisyon aç (ayrı hesap; sistemin stratejileriyle karışmaz). Stop ZORUNLU. Boyutu sen seçersin ama stopa kadar risk işlem başı tavanı ($1000) ve prop limitlerini (günlük zarar, taban) aşamaz; aşarsa reddedilir. Piyasa emri sonraki 1m barın açılışında dolar; limit verilirse o fiyattan. Hesapta aynı anda tek pozisyon. Sonucu atlas_trades ile kontrol et.",
+        read_only: false,
+        slow: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "side": {"type": "string", "enum": ["buy", "sell"]},
+                    "size": {"type": "string", "description": "BTC miktarı, 0.001 katı (ör. 0.05)", "maxLength": 20},
+                    "stop": {"type": "string", "description": "Stop fiyatı (ör. 67250.5); alışta fiyatın altında, satışta üstünde", "maxLength": 20},
+                    "target": {"type": "string", "description": "Hedef fiyatı (isteğe bağlı)", "maxLength": 20},
+                    "limit": {"type": "string", "description": "Limit giriş fiyatı (isteğe bağlı; yoksa piyasa)", "maxLength": 20},
+                    "expiry_min": {"type": "integer", "minimum": 1, "maximum": 1440, "description": "Limit emrin geçerliliği (dk, varsayılan 60)"},
+                    "reason": {"type": "string", "minLength": 3, "maxLength": 500, "description": "Neden bu işlem (journal'a yazılır)"},
+                },
+                "required": ["side", "size", "stop", "reason"],
+                "additionalProperties": false,
+            })
+        },
+    },
+    Tool {
+        name: "atlas_trade_close",
+        description: "Grok hesabındaki açık pozisyonu sonraki barın açılışından piyasadan kapat.",
+        read_only: false,
+        slow: false,
+        schema: reason_only,
+    },
+    Tool {
+        name: "atlas_trade_cancel",
+        description: "Grok hesabındaki bekleyen (dolmamış) limit girişini iptal et.",
+        read_only: false,
+        slow: false,
+        schema: reason_only,
     },
     Tool {
         name: "atlas_verify",
@@ -387,6 +462,50 @@ pub fn resolve(name: &str, args: &Value) -> Result<Vec<String>, String> {
                 .ok_or_else(|| bad("'id' ≥1 tam sayı"))?;
             vec![s("approvals"), s("show"), j, s("--"), id.to_string()]
         }
+        "atlas_market" => {
+            let mut v = vec![s("market"), j];
+            if let Some(b) = a.get("bars").filter(|b| !b.is_null()) {
+                let n = b
+                    .as_u64()
+                    .filter(|n| (1..=240).contains(n))
+                    .ok_or_else(|| bad("'bars' 1..240 tam sayı"))?;
+                v.extend([s("--bars"), n.to_string()]);
+            }
+            v
+        }
+        "atlas_trades" => vec![s("trade"), s("list"), j],
+        "atlas_trade_open" => {
+            let mut v = vec![
+                s("trade"),
+                s("open"),
+                j,
+                s("--side"),
+                s(one_of(a, "side", &["buy", "sell"])?),
+                s("--size"),
+                s(decimal(a, "size")?),
+                s("--stop"),
+                s(decimal(a, "stop")?),
+            ];
+            if a.get("target").is_some_and(|x| !x.is_null()) {
+                v.extend([s("--target"), s(decimal(a, "target")?)]);
+            }
+            if a.get("limit").is_some_and(|x| !x.is_null()) {
+                v.extend([s("--limit"), s(decimal(a, "limit")?)]);
+            }
+            if let Some(e) = a.get("expiry_min").filter(|x| !x.is_null()) {
+                let n = e
+                    .as_u64()
+                    .filter(|n| (1..=1440).contains(n))
+                    .ok_or_else(|| bad("'expiry_min' 1..1440 tam sayı"))?;
+                v.extend([s("--expiry-min"), n.to_string()]);
+            }
+            v.extend([s("--"), s(text(a, "reason", 500)?)]);
+            v
+        }
+        "atlas_trade_close" | "atlas_trade_cancel" => {
+            let op = name.trim_start_matches("atlas_trade_");
+            vec![s("trade"), s(op), j, s("--"), s(text(a, "reason", 500)?)]
+        }
         "atlas_verify" => vec![
             s("verify"),
             s(one_of(a, "milestone", &["m1", "m2", "m3", "m4"])?),
@@ -418,7 +537,7 @@ mod tests {
 
     #[test]
     fn her_arac_alt_komutla_baslar_ve_json() {
-        let ok_args = json!({"period":"daily","name":"x","id":"x","reason":"neden","scope":"global","text":"t","milestone":"m1"});
+        let ok_args = json!({"period":"daily","name":"x","id":"x","reason":"neden","scope":"global","text":"t","milestone":"m1","side":"buy","size":"0.01","stop":"60000"});
         for t in TOOLS {
             let props = t.input_schema()["properties"].as_object().cloned().unwrap();
             let mut a = Map::new();
@@ -487,6 +606,69 @@ mod tests {
         assert!(r("atlas_report", json!({"period": "monthly"})).is_err());
         assert!(r("atlas_approvals_show", json!({"id": "1"})).is_err());
         assert!(r("atlas_status", json!([1])).is_err());
+    }
+
+    #[test]
+    fn islem_araclari() {
+        let v = r(
+            "atlas_trade_open",
+            json!({"side":"sell","size":"0.05","stop":"70100.5","target":"68000","reason":"direnç reddi"}),
+        )
+        .unwrap();
+        assert_eq!(
+            v,
+            [
+                "trade",
+                "open",
+                "--json",
+                "--side",
+                "sell",
+                "--size",
+                "0.05",
+                "--stop",
+                "70100.5",
+                "--target",
+                "68000",
+                "--",
+                "direnç reddi"
+            ]
+        );
+        assert!(
+            r(
+                "atlas_trade_open",
+                json!({"side":"buy","size":"0.05","reason":"x y z"})
+            )
+            .is_err()
+        );
+        assert!(
+            r(
+                "atlas_trade_open",
+                json!({"side":"buy","size":"-1","stop":"1","reason":"abc"})
+            )
+            .is_err()
+        );
+        assert!(
+            r(
+                "atlas_trade_open",
+                json!({"side":"buy","size":"1e3","stop":"1","reason":"abc"})
+            )
+            .is_err()
+        );
+        assert!(
+            r(
+                "atlas_trade_open",
+                json!({"side":"hold","size":"1","stop":"1","reason":"abc"})
+            )
+            .is_err()
+        );
+        assert_eq!(
+            r("atlas_trade_close", json!({"reason":"hedefe yakın"})).unwrap(),
+            ["trade", "close", "--json", "--", "hedefe yakın"]
+        );
+        assert_eq!(
+            r("atlas_market", json!({"bars": 60})).unwrap(),
+            ["market", "--json", "--bars", "60"]
+        );
     }
 
     #[test]

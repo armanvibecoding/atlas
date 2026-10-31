@@ -2,6 +2,7 @@
 //! Çıktı şeması: docs/cli-schema.md (`atlas.cli/1`).
 
 mod daemon;
+mod grok;
 mod home;
 mod m2;
 mod m3;
@@ -126,6 +127,60 @@ enum Cmd {
     Note { text: Vec<String> },
     /// Webhook'a tek test olayı gönder (§7.1 madde 4; yalnız Arman).
     WebhookTest,
+    /// Grok operatör hesabı (ayrı sanal hesap, ADR 0010): emir ver / kapat / iptal / listele.
+    Trade {
+        #[command(subcommand)]
+        cmd: TradeCmd,
+    },
+    /// Canlı piyasa özeti (son 24 sa 1m bar, 15m/1h özet, EMA/ATR/VWAP).
+    Market {
+        /// Gösterilecek son 1m bar sayısı (1..240).
+        #[arg(long, default_value_t = 30)]
+        bars: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum TradeCmd {
+    /// Pozisyon aç. Stop zorunlu; boyut serbest ama işlem başı risk tavanı ve prop limitleri aşılamaz.
+    Open {
+        /// buy | sell
+        #[arg(long)]
+        side: String,
+        /// Dayanak miktarı (BTCUSDT: BTC, 0.001 katı).
+        #[arg(long)]
+        size: String,
+        /// Stop fiyatı (zorunlu).
+        #[arg(long)]
+        stop: String,
+        /// Hedef fiyatı (isteğe bağlı).
+        #[arg(long)]
+        target: Option<String>,
+        /// Limit giriş fiyatı; yoksa piyasa (sonraki barın açılışı).
+        #[arg(long)]
+        limit: Option<String>,
+        /// Limit emrin geçerliliği (dakika, varsayılan 60).
+        #[arg(long)]
+        expiry_min: Option<u32>,
+        #[arg(long, default_value = "BTCUSDT")]
+        symbol: String,
+        /// Gerekçe (journal'a yazılır).
+        reason: Vec<String>,
+    },
+    /// Açık pozisyonu piyasadan kapat.
+    Close {
+        #[arg(long, default_value = "BTCUSDT")]
+        symbol: String,
+        reason: Vec<String>,
+    },
+    /// Bekleyen limit girişini iptal et.
+    Cancel {
+        #[arg(long, default_value = "BTCUSDT")]
+        symbol: String,
+        reason: Vec<String>,
+    },
+    /// Hesap durumu: bakiye, pozisyon, emirler, işlemler, limitler.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -400,6 +455,37 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
         Cmd::Kill { scope, reason } => kill(&h, out, &scope, &reason.join(" ")),
         Cmd::KillReset { scope } => kill_reset(&h, out, &scope),
         Cmd::Note { text } => note(&h, out, text),
+        Cmd::Trade { cmd } => match cmd {
+            TradeCmd::Open {
+                side,
+                size,
+                stop,
+                target,
+                limit,
+                expiry_min,
+                symbol,
+                reason,
+            } => grok::trade_open(
+                &h,
+                out,
+                &symbol,
+                &side,
+                &size,
+                &stop,
+                target.as_deref(),
+                limit.as_deref(),
+                expiry_min,
+                &reason,
+            ),
+            TradeCmd::Close { symbol, reason } => {
+                grok::trade_simple(&h, out, &symbol, "close", &reason)
+            }
+            TradeCmd::Cancel { symbol, reason } => {
+                grok::trade_simple(&h, out, &symbol, "cancel", &reason)
+            }
+            TradeCmd::List => grok::trade_list(&h, out),
+        },
+        Cmd::Market { bars } => grok::market(&h, out, bars),
         Cmd::WebhookTest => {
             let v = daemon::webhook_test(&h)?;
             out.emit("webhook-test", true, v, || {

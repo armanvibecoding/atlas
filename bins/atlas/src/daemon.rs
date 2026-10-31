@@ -132,6 +132,10 @@ pub struct DaemonOpts {
     pub stop_file: PathBuf,
     /// `true`: config ne derse desin LLM çağrısı yapılmaz (doğrulama koşuları).
     pub disable_agents: bool,
+    /// Grok hesap anlık görüntüsü (CLI `trade list`). `None` = yazılmaz.
+    pub grok_snapshot: Option<PathBuf>,
+    /// Piyasa anlık görüntüsü (CLI `market`). `None` = yazılmaz.
+    pub market_snapshot: Option<PathBuf>,
 }
 
 impl DaemonOpts {
@@ -147,6 +151,8 @@ impl DaemonOpts {
             search_every_override: None,
             stop_file: h.path("var/daemon.stop"),
             disable_agents: false,
+            grok_snapshot: Some(h.path("var/grok_account.json")),
+            market_snapshot: Some(h.path("var/market.json")),
         }
     }
 }
@@ -243,6 +249,45 @@ pub fn webhook_test(h: &Home) -> Result<serde_json::Value> {
         .send(&msg)
         .map_err(|e| anyhow!("teslim başarısız: {e}"))?;
     Ok(json!({"delivered": true, "idempotency_key": key, "auth_header": sender.has_auth()}))
+}
+
+/// CLI kill kapsamlarını tek hesabın kill durumuna eşler. global/account → hesap; `strategy:X` yalnız adı X
+/// olan ya da genom hash'i X ile başlayan (≥6 karakter) hesaba, o hesabın kill'i olarak.
+fn sync_kills(
+    kills: &BTreeMap<String, String>,
+    name: &str,
+    hash: &str,
+    ks: &mut atlas_risk::KillState,
+    t: UnixNanos,
+) {
+    let wanted: BTreeMap<String, String> = kills
+        .iter()
+        .filter_map(|(scope, reason)| match KillScope::parse(scope) {
+            Ok(KillScope::Global) => Some(("global".to_string(), reason.clone())),
+            Ok(KillScope::Account) => Some(("account".to_string(), reason.clone())),
+            Ok(KillScope::Strategy(id)) => {
+                let id = id.as_str();
+                (id == name || (!hash.is_empty() && id.len() >= 6 && hash.starts_with(id)))
+                    .then(|| ("account".to_string(), format!("strategy:{id} — {reason}")))
+            }
+            Err(_) => None,
+        })
+        .collect();
+    let active: Vec<String> = ks.active().into_iter().map(|(s, _)| s.label()).collect();
+    for (label, reason) in &wanted {
+        if !active.contains(label)
+            && let Ok(sc) = KillScope::parse(label)
+        {
+            ks.trigger(sc, reason, t);
+        }
+    }
+    for a in active {
+        if !wanted.contains_key(&a)
+            && let Ok(sc) = KillScope::parse(&a)
+        {
+            ks.reset(&sc, t);
+        }
+    }
 }
 
 pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
@@ -348,6 +393,26 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         .collect();
     let mut unsaved: Vec<Bar> = Vec::new();
     let mut runners: BTreeMap<String, Runner> = BTreeMap::new();
+    // Grok hesabı: journal'daki uygulanmış emirler + depodaki barlarla yeniden kurulur.
+    let mut grok = crate::grok::GrokDesk::rebuild(
+        &sink.journal,
+        &inst,
+        Arc::clone(&prop_gate),
+        warm_from,
+        |from| {
+            if replay {
+                Ok(is_bars
+                    .iter()
+                    .filter(|b| b.open_ts >= from)
+                    .copied()
+                    .collect())
+            } else {
+                Ok(store
+                    .load_bars("binance_futures", &symbol, "ohlcv_1m", from, UnixNanos::MAX)?
+                    .0)
+            }
+        },
+    )?;
     let mut sum = DaemonSummary {
         webhook_configured: sender.configured(),
         ..Default::default()
@@ -490,36 +555,21 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         let kills = sink.journal.projection().kills.clone();
         for (hash, r) in runners.iter_mut() {
             let name = r.name.clone();
-            let wanted: BTreeMap<String, String> = kills
-                .iter()
-                .filter_map(|(scope, reason)| match KillScope::parse(scope) {
-                    Ok(KillScope::Global) => Some(("global".to_string(), reason.clone())),
-                    Ok(KillScope::Account) => Some(("account".to_string(), reason.clone())),
-                    Ok(KillScope::Strategy(id)) => {
-                        let id = id.as_str();
-                        (id == name || (id.len() >= 6 && hash.starts_with(id)))
-                            .then(|| ("account".to_string(), format!("strategy:{id} — {reason}")))
-                    }
-                    Err(_) => None,
-                })
-                .collect();
-            let ks = &mut r.engine_mut().state_mut().kills;
-            let active: Vec<String> = ks.active().into_iter().map(|(s, _)| s.label()).collect();
-            for (label, reason) in &wanted {
-                if !active.contains(label)
-                    && let Ok(sc) = KillScope::parse(label)
-                {
-                    ks.trigger(sc, reason, t);
-                }
-            }
-            for a in active {
-                if !wanted.contains_key(&a)
-                    && let Ok(sc) = KillScope::parse(&a)
-                {
-                    ks.reset(&sc, t);
-                }
-            }
+            sync_kills(
+                &kills,
+                &name,
+                hash,
+                &mut r.engine_mut().state_mut().kills,
+                t,
+            );
         }
+        sync_kills(
+            &kills,
+            atlas_exec::manual::GROK_ID,
+            "",
+            &mut grok.account.engine_mut().state_mut().kills,
+            t,
+        );
 
         // 4. Koşucuları adımla, sapma kararları
         let mut failed: Vec<String> = Vec::new();
@@ -565,6 +615,18 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         }
         for h_ in failed {
             runners.remove(&h_);
+        }
+        // 4b. Grok operatör hesabı (ADR 0010)
+        match grok.step_tick(&sink.journal, &new_bars, t) {
+            Ok(evs) => events.extend(evs),
+            Err(e) => events.push(
+                Event::new(
+                    t,
+                    EventKind::EngineFailure,
+                    json!({"component": "grok_hesabı", "error": e.to_string()}),
+                )
+                .with_key("engine:grok"),
+            ),
         }
         for (hash, name, stage, verdict, d) in decisions {
             match verdict {
@@ -716,6 +778,13 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
         sink.maybe_digest(t)?;
         let d = sink.deliver(t, &sender)?;
         sum.delivered += d.sent;
+        // Anlık görüntüler (CLI `trade list`, `market`); yazılamazsa daemon durmaz.
+        if let Some(p) = &opts.grok_snapshot {
+            let _ = crate::grok::write_atomic(p, &grok.account.snapshot(t));
+        }
+        if let Some(p) = &opts.market_snapshot {
+            let _ = crate::grok::write_atomic(p, &crate::grok::market_snapshot(&inst, &history, t));
+        }
 
         // 9. Checkpoint, kalıcılık
         if sum
