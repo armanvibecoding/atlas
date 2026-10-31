@@ -326,7 +326,10 @@ impl Registry {
         if let Some(id) = self
             .conn
             .query_row(
-                "SELECT id FROM holdouts WHERE dataset=?1 AND from_ts=?2 AND to_ts=?3",
+                // Örtüşen (ör. yeni veriyle birkaç gün kaymış) pencere aynı holdout sayılır:
+                // bütçe yeni veri çekimiyle yenilenemez. Yalnız tamamen yeni (örtüşmeyen) dönem
+                // yeni bütçe alır (§4.6 kapı 10: "yeni holdout dönemi").
+                "SELECT id FROM holdouts WHERE dataset=?1 AND from_ts < ?3 AND to_ts > ?2 ORDER BY id DESC LIMIT 1",
                 params![dataset, to_i64(from), to_i64(to)],
                 |r| r.get::<_, i64>(0),
             )
@@ -558,6 +561,8 @@ mod tests {
         let mut r = Registry::open_in_memory().unwrap();
         let h = r.ensure_holdout("BTC", 10, 20, 2, 0).unwrap();
         assert_eq!(r.ensure_holdout("BTC", 10, 20, 2, 0).unwrap(), h);
+        // Kaymış ama örtüşen pencere aynı bütçeyi kullanır.
+        assert_eq!(r.ensure_holdout("BTC", 12, 22, 2, 0).unwrap(), h);
         assert_eq!(r.record_holdout_access(h, "x", 1).unwrap(), (1, 2));
         assert_eq!(r.record_holdout_access(h, "y", 2).unwrap(), (2, 2));
         assert!(matches!(
@@ -565,6 +570,14 @@ mod tests {
             Err(RegistryError::HoldoutExhausted { used: 2, budget: 2 })
         ));
         assert_eq!(r.holdout_usage(h).unwrap(), (2, 2));
+        // Kaydırılmış pencereyle yeni bütçe "basılamaz".
+        let h2 = r.ensure_holdout("BTC", 15, 25, 2, 0).unwrap();
+        assert_eq!(h2, h);
+        assert!(r.record_holdout_access(h2, "w", 4).is_err());
+        // Tamamen yeni dönem yeni bütçe alır.
+        let h3 = r.ensure_holdout("BTC", 30, 40, 2, 0).unwrap();
+        assert_ne!(h3, h);
+        assert!(r.record_holdout_access(h3, "v", 5).is_ok());
     }
 
     #[test]

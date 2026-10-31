@@ -122,6 +122,15 @@ impl GauntletConfig {
             "holdout_min_trades",
             c.holdout_min_trades >= d.holdout_min_trades,
         );
+        // Holdout ve Monte Carlo alanları da kapı ayarıdır: gevşetilemez.
+        chk("holdout_budget", c.holdout_budget <= d.holdout_budget);
+        chk("holdout_days", c.holdout_days >= d.holdout_days);
+        chk("mc_horizon_days", c.mc_horizon_days <= d.mc_horizon_days);
+        chk("mc_paths", c.mc_paths >= d.mc_paths);
+        chk(
+            "cost_stress_mult üst sınır",
+            c.cost_stress_mult.is_finite() && c.cost_stress_mult <= 20.0,
+        );
         chk(
             "cpcv_groups",
             c.cpcv_groups >= 4 && c.cpcv_test_groups >= 1 && c.cpcv_test_groups < c.cpcv_groups,
@@ -522,8 +531,8 @@ pub fn run_pre_holdout(
         g,
         m,
         Cost {
-            slippage_mult_milli: ctx.cost.slippage_mult_milli * k / 1000,
-            fee_mult_milli: ctx.cost.fee_mult_milli * k / 1000,
+            slippage_mult_milli: ctx.cost.slippage_mult_milli.saturating_mul(k) / 1000,
+            fee_mult_milli: ctx.cost.fee_mult_milli.saturating_mul(k) / 1000,
         },
         None,
     )?;
@@ -700,4 +709,31 @@ pub fn run(
     let pre = run_pre_holdout(ctx, g, n, &sharpes)?;
     let ms = t0.elapsed().as_millis() as u64;
     finish(ctx, g, pre, reg, source, parent_id, now, ms)
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn config_only_tightens() {
+        assert!(GauntletConfig::from_atlas_toml("").is_ok());
+        assert!(GauntletConfig::from_atlas_toml("[gauntlet]\ndsr_min = 0.99").is_ok());
+        for loose in [
+            "dsr_min = 0.5",
+            "pbo_max = 0.5",
+            "holdout_budget = 50",
+            "holdout_days = 10",
+            "mc_horizon_days = 1000",
+            "mc_paths = 10",
+            "cost_stress_mult = 1.0",
+            "cost_stress_mult = 1e9",
+            "min_trades_is = 10",
+        ] {
+            assert!(
+                GauntletConfig::from_atlas_toml(&format!("[gauntlet]\n{loose}")).is_err(),
+                "{loose} kabul edilmemeli"
+            );
+        }
+    }
 }
