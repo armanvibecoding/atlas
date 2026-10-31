@@ -114,6 +114,14 @@ pub trait FillModel {
             .filter_map(|o| self.match_one(ev, o, slippage_ticks, scope))
             .collect()
     }
+
+    /// Durumlu modeller için: her piyasa olayı, emir olsun olmasın, eşleştirmeden **önce** bir kez
+    /// bildirilir (ör. `MboQueueFill` son kotasyonu buradan öğrenir). Durumsuz modellerde boş.
+    fn observe(&self, _ev: &MarketEvent) {}
+
+    /// Emir dolum dışı bir nedenle kapandı (iptal, OCO kardeşi, süre dolumu). Durumlu modeller
+    /// emre ait durumu bırakır. Durumsuz modellerde boş.
+    fn order_closed(&self, _order_id: u64) {}
 }
 
 /// Bir yön için kaymayı uygula (her zaman aleyhte).
