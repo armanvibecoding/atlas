@@ -13,16 +13,16 @@
 | M3 Otonomi | 72 sa insansız, deney üretir/eler, 0 outbox_dead, Grok izinleri | `verify m3` **5/5** (72 sa sanal saatle; gerçek VPS koşusu bekliyor) |
 | M4 Derinlik | kalibrasyon farkı küçülür, sandbox reddi, dashboard tam | `verify m4` **4/4** |
 
-219 test, clippy `-D warnings` temiz, GitHub CI yeşil. Repo: https://github.com/armanvibecoding/atlas
+233 test, clippy `-D warnings` temiz, GitHub CI yeşil. Repo: https://github.com/armanvibecoding/atlas
 
 ## 2. Devir koşulları (§7.1) — kalan
 
 | # | Koşul | Durum |
 |---|---|---|
-| 1 | `verify m1..m4` **VPS üzerinde** yeşil | ⚠ VPS'te m1 24/24, m3 5/5, m4 4/4; **m2'de yalnız hız kontrolü kırmızı** (paylaşımlı 2,0 GHz vCPU, yük ~7/8 çekirdek: tek genom 351–467 ms, NQ eşdeğeri ~270–360 ms > 200 ms; yerelde 167 ms). Referans raporları VPS'te üretildi |
-| 2 | 7 günlük kesintisiz gölge+paper denemesi | ⏳ **başladı 2026-10-31 20:21 UTC**, biter 2026-11-07 20:21 UTC (`atlas.service`) |
-| 3 | Grok komutları VPS'te `atlas-admin` üzerinden; izin testleri yeşil | ✓ sunucuda denendi (grok → atlas-admin → sudo → atlas-grok). **Grok'un SSH açık anahtarı eklenmeli** |
-| 4 | Webhook Grok'un alarm routine'ine bağlı, test olayı teslim | ⏳ URL yok |
+| 1 | `verify m1..m4` **VPS üzerinde** yeşil | ✓ (kabulle) VPS'te m1 24/24, m3 5/5, m4 4/4; m2'de yalnız hız kontrolü kırmızı (paylaşımlı 2,0 GHz vCPU: tek genom 351–467 ms > 200 ms; yerelde 167 ms). **Arman 2026-11-01'de kabul etti**: işleyişe etkisi yok (dakikada 4 değerlendirme). Referans raporları VPS'te üretildi |
+| 2 | 7 günlük kesintisiz gölge+paper denemesi | ⏳ ilk koşu 2026-10-31 20:21 UTC'de başladı; webhook/MCP için tek yeniden başlatmayla **yeniden başlıyor** (Arman onayı, 2026-11-01). Başlangıç/bitiş Arman'daki GROK_OPS kopyasında |
+| 3 | Grok komutları VPS'te; izin testleri yeşil | ✓ Grok SSH kullanamadığı için erişim **uzak MCP sunucusu** (ADR 0009): 16 araç = §6 izinli komutlar; MCP → sudo → atlas-grok → CLI zinciri sunucuda denendi. Yasaklar 3 katmanda (araç listesi, atlas-grok argv, CLI rolü). SSH sarmalayıcısı yedek yol |
+| 4 | Webhook Grok'un alarm routine'ine bağlı, test olayı teslim | ⏳ Bearer destekli; adres+anahtar `/etc/atlas/atlas.env`'e alınıp `atlas webhook-test` ile denenecek |
 | 5 | `GROK_OPS.md` güncel | ✓ |
 | 6 | `HANDOFF.md` | ✓ (bu belge) |
 
