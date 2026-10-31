@@ -446,20 +446,36 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             }
         }
 
-        // 3. Kill switch senkronu (CLI `kill` / `kill-reset` journal'a yazar)
+        // 3. Kill switch senkronu (CLI `kill` / `kill-reset` journal'a yazar).
+        // Her koşucunun kendi (araştırma/paper) hesabı vardır: global/account kill hepsine, `strategy:X`
+        // yalnız adı X olan ya da genom hash'i X ile başlayan koşucuya, o koşucunun hesap kill'i olarak uygulanır.
         let kills = sink.journal.projection().kills.clone();
-        for r in runners.values_mut() {
+        for (hash, r) in runners.iter_mut() {
+            let name = r.name.clone();
+            let wanted: BTreeMap<String, String> = kills
+                .iter()
+                .filter_map(|(scope, reason)| match KillScope::parse(scope) {
+                    Ok(KillScope::Global) => Some(("global".to_string(), reason.clone())),
+                    Ok(KillScope::Account) => Some(("account".to_string(), reason.clone())),
+                    Ok(KillScope::Strategy(id)) => {
+                        let id = id.as_str();
+                        (id == name || (id.len() >= 6 && hash.starts_with(id)))
+                            .then(|| ("account".to_string(), format!("strategy:{id} — {reason}")))
+                    }
+                    Err(_) => None,
+                })
+                .collect();
             let ks = &mut r.engine_mut().state_mut().kills;
             let active: Vec<String> = ks.active().into_iter().map(|(s, _)| s.label()).collect();
-            for (scope, reason) in &kills {
-                if !active.contains(scope)
-                    && let Ok(sc) = KillScope::parse(scope)
+            for (label, reason) in &wanted {
+                if !active.contains(label)
+                    && let Ok(sc) = KillScope::parse(label)
                 {
                     ks.trigger(sc, reason, t);
                 }
             }
             for a in active {
-                if !kills.contains_key(&a)
+                if !wanted.contains_key(&a)
                     && let Ok(sc) = KillScope::parse(&a)
                 {
                     ks.reset(&sc, t);
