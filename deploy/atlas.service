@@ -17,8 +17,7 @@ RestartSec=10
 # Daemon her dakika WATCHDOG=1 gönderir; 5 dk sessizlik = yeniden başlat.
 WatchdogSec=300
 TimeoutStopSec=60
-# Grup (grok) da journal/sicile yazabilsin.
-UMask=0007
+UMask=0027
 
 # Kaynak limitleri
 MemoryMax=3G

@@ -709,12 +709,17 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
             "deploy/install.sh",
             "deploy/atlas.service",
             "deploy/logrotate.conf",
+            "deploy/atlas-grok",
         ] {
             if !h.root.join(f).exists() {
                 bad.push(format!("{f} yok"));
             }
         }
-        for f in ["deploy/atlas-admin", "deploy/install.sh"] {
+        for f in [
+            "deploy/atlas-admin",
+            "deploy/install.sh",
+            "deploy/atlas-grok",
+        ] {
             if let Ok(o) = bash_cmd()
                 .arg("-n")
                 .arg(bash_path(&h.root.join(f)))

@@ -43,10 +43,9 @@ chmod 750 "$PREFIX"
 chown -R root:atlas "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
 chmod -R go-w "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
 chmod -R g+rX "$PREFIX/bin" "$PREFIX/configs" "$PREFIX/strategies" "$PREFIX/deploy"
+# var/ yalnız servis hesabına ait (chown -R sembolik bağlantıyı takip etmez). Grok buraya doğrudan yazamaz.
 chown -R atlas:atlas "$PREFIX/var"
-# var/ grup (atlas) yazılabilir + setgid: Grok (grok ∈ atlas) kill/note/pause ile journal ve sicile yazabilir.
-chmod -R g+rwX "$PREFIX/var"
-find "$PREFIX/var" -type d -exec chmod g+s {} +
+chmod 750 "$PREFIX/var"
 
 install -d -m 750 /etc/atlas
 if [[ ! -f /etc/atlas/atlas.env ]]; then
@@ -63,8 +62,16 @@ chown root:atlas /etc/atlas/atlas.env
 install -m 755 "$SRC/deploy/atlas-admin" /usr/local/bin/atlas-admin
 install -m 644 "$SRC/deploy/atlas.service" /etc/systemd/system/atlas.service
 install -m 644 "$SRC/deploy/logrotate.conf" /etc/logrotate.d/atlas
-# Grok, atlas grubunda: var/ altını okuyabilir (journal, sicil); yazma yalnız CLI üzerinden.
-usermod -aG atlas grok
+# Grok yalnız tek yardımcıyı servis hesabı olarak çalıştırabilir (rol orada zorlanır).
+install -d -m 755 /usr/local/lib/atlas
+install -m 755 -o root -g root "$SRC/deploy/atlas-grok" /usr/local/lib/atlas/atlas-grok
+SUDOERS_TMP="$(mktemp)"
+echo "grok ALL=(atlas) NOPASSWD: /usr/local/lib/atlas/atlas-grok" > "$SUDOERS_TMP"
+visudo -cf "$SUDOERS_TMP" >/dev/null
+install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/atlas-grok
+rm -f "$SUDOERS_TMP"
+# Eski kurulumdan kalan grup üyeliği kaldırılır.
+gpasswd -d grok atlas >/dev/null 2>&1 || true
 
 systemctl daemon-reload
 systemctl enable atlas.service

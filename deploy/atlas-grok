@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# atlas-grok — root'a ait yardımcı. atlas-admin bunu `sudo -n -u atlas` ile çağırır (sudoers yalnız bunu izinler).
+# Rol ve ev dizini BURADA zorlanır; sudo ortamı sıfırladığı için çağıran bunları değiştiremez.
+# CLI ayrıca ATLAS_ROLE=grok iken yasak komutları reddeder (ikinci katman).
+set -euo pipefail
+export ATLAS_HOME=/opt/atlas
+export ATLAS_ROLE=grok
+umask 077
+cd /opt/atlas
+exec /opt/atlas/bin/atlas "$@"

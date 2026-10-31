@@ -7,11 +7,13 @@
 # Ret çıkış kodu: 126.
 set -euo pipefail
 
-ATLAS_BIN="${ATLAS_BIN:-/opt/atlas/bin/atlas}"
+# Üretim: komut `sudo -n -u atlas /usr/local/lib/atlas/atlas-grok` ile servis hesabı olarak çalışır;
+# grok kullanıcısının journal/sicil dosyalarına doğrudan erişimi yoktur.
+# Test (verify m3): ATLAS_BIN verilirse o binary doğrudan, ATLAS_ROLE=grok ile çalışır.
+# (SSH zorunlu komutunda istemci ortam değişkeni geçiremez; AcceptEnv kapalı.)
+ATLAS_BIN="${ATLAS_BIN:-}"
 export ATLAS_HOME="${ATLAS_ADMIN_HOME:-/opt/atlas}"
 export ATLAS_ROLE=grok
-# Oluşturulan dosyalar atlas grubunca yazılabilir kalsın (journal, sicil).
-umask 007
 
 deny() {
   echo "izin yok: $1" >&2
@@ -49,4 +51,7 @@ case "$c0" in
 esac
 if [[ "$c0" == "experiments" && "$c1" != "summary" ]]; then deny "experiments summary"; fi
 
-exec "$ATLAS_BIN" "${argv[@]}"
+if [[ -n "$ATLAS_BIN" ]]; then
+  exec "$ATLAS_BIN" "${argv[@]}"
+fi
+exec sudo -n -u atlas /usr/local/lib/atlas/atlas-grok "${argv[@]}"
