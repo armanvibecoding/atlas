@@ -194,6 +194,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "atlas-ml"
+version = "0.1.0"
+dependencies = [
+ "atlas-core",
+ "atlas-features",
+ "atlas-sim",
+ "rand 0.9.5",
+ "rand_chacha 0.9.0",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "atlas-registry"
 version = "0.1.0"
 dependencies = [
