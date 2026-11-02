@@ -438,6 +438,8 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
             }
         },
     )?;
+    // Grok alarmları (ADR 0012): journal'dan kurulur; tetiklenmiş/iptal alarm tekrar etkinleşmez.
+    let mut alerts = crate::alerts::AlertDesk::rebuild(&sink.journal, &inst)?;
     let mut sum = DaemonSummary {
         webhook_configured: sender.configured(),
         ..Default::default()
@@ -654,6 +656,8 @@ pub fn run(h: &Home, opts: &DaemonOpts) -> Result<DaemonSummary> {
                 .with_key("engine:grok"),
             ),
         }
+        // 4c. Grok alarmları: bu tick'in barlarıyla denetlenir → price_alert (HIGH, webhook).
+        events.extend(alerts.step_tick(&sink.journal, &new_bars, t));
         for (hash, name, stage, verdict, d) in decisions {
             match verdict {
                 Verdict::Demote => {

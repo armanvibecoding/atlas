@@ -330,6 +330,50 @@ pub const TOOLS: &[Tool] = &[
         schema: reason_only,
     },
     Tool {
+        name: "atlas_alert_set",
+        description: "Fiyat ya da seans alarmı kur (BTCUSDT): koşul gerçekleşince Atlas webhook'u seni uyandırır (price_alert, HIGH; sessiz saatte de). Tek seferlik. condition: price_above / price_below (price zorunlu; son fiyatın üstünde/altında olmalı; expiry_hours 1..168, varsayılan 24) ya da session_open (session: london = 07:00 UTC, ny = 09:30 US/Eastern; sonraki hafta içi açılış, açılıştan 60 dk sonra düşer). En fazla 20 etkin alarm. Emir vermez.",
+        read_only: false,
+        slow: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "condition": {"type": "string", "enum": ["price_above", "price_below", "session_open"]},
+                    "price": {"type": "string", "description": "Seviye (ör. 70250.5); price_above/price_below için", "maxLength": 20},
+                    "session": {"type": "string", "enum": ["london", "ny"], "description": "session_open için"},
+                    "expiry_hours": {"type": "integer", "minimum": 1, "maximum": 168, "description": "Fiyat alarmının geçerliliği (sa, varsayılan 24)"},
+                    "note": {"type": "string", "maxLength": 200, "description": "Not (tetiklenince olayda geri gelir)"},
+                },
+                "required": ["condition"],
+                "additionalProperties": false,
+            })
+        },
+    },
+    Tool {
+        name: "atlas_alerts",
+        description: "Alarmların: etkinler + son sonuçlananlar (triggered / cancelled / expired) ve limitler.",
+        read_only: true,
+        slow: false,
+        schema: empty,
+    },
+    Tool {
+        name: "atlas_alert_cancel",
+        description: "Etkin alarmı iptal et (id = atlas_alert_set'in döndürdüğü alert_id).",
+        read_only: false,
+        slow: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "minimum": 1},
+                    "reason": {"type": "string", "maxLength": 500},
+                },
+                "required": ["id"],
+                "additionalProperties": false,
+            })
+        },
+    },
+    Tool {
         name: "atlas_verify",
         description: "Kilometre taşı kabul testi (m1..m4). AĞIR: dakikalar sürebilir ve CPU yer; yalnız gerektiğinde, günde en fazla bir kez.",
         read_only: true,
@@ -567,6 +611,7 @@ pub fn resolve(name: &str, args: &Value) -> Result<Vec<String>, String> {
             let op = name.trim_start_matches("atlas_trade_");
             vec![s("trade"), s(op), j, s("--"), s(text(a, "reason", 500)?)]
         }
+        "atlas_alert_set" | "atlas_alerts" | "atlas_alert_cancel" => resolve_alert(name, a, j)?,
         "atlas_verify" => vec![
             s("verify"),
             s(one_of(a, "milestone", &["m1", "m2", "m3", "m4"])?),
@@ -575,6 +620,66 @@ pub fn resolve(name: &str, args: &Value) -> Result<Vec<String>, String> {
         _ => return Err(bad(format!("bilinmeyen araç: {name}"))),
     };
     Ok(out)
+}
+
+/// Alarm araçları (ADR 0012) → `alert add|list|cancel`. Not/gerekçe yalnız `--` ayracından sonra.
+fn resolve_alert(name: &str, a: &Map<String, Value>, j: String) -> Result<Vec<String>, String> {
+    Ok(match name {
+        "atlas_alert_set" => {
+            let mut v = vec![s("alert"), s("add"), j];
+            let has = |k: &str| a.get(k).is_some_and(|x| !x.is_null());
+            match one_of(
+                a,
+                "condition",
+                &["price_above", "price_below", "session_open"],
+            )? {
+                "session_open" => {
+                    if has("price") || has("expiry_hours") {
+                        return Err(bad(
+                            "session_open ile 'price' / 'expiry_hours' verilmez (açılıştan 60 dk sonra düşer)",
+                        ));
+                    }
+                    v.extend([s("--session"), s(one_of(a, "session", &["london", "ny"])?)]);
+                }
+                c => {
+                    if has("session") {
+                        return Err(bad("'session' yalnız session_open ile"));
+                    }
+                    let flag = if c == "price_above" {
+                        "--above"
+                    } else {
+                        "--below"
+                    };
+                    v.extend([s(flag), s(decimal(a, "price")?)]);
+                    if let Some(e) = a.get("expiry_hours").filter(|x| !x.is_null()) {
+                        let n = e
+                            .as_u64()
+                            .filter(|n| (1..=168).contains(n))
+                            .ok_or_else(|| bad("'expiry_hours' 1..168 tam sayı"))?;
+                        v.extend([s("--expiry-hours"), n.to_string()]);
+                    }
+                }
+            }
+            if let Some(n) = opt_text(a, "note", 200)? {
+                v.extend([s("--"), s(n)]);
+            }
+            v
+        }
+        "atlas_alerts" => vec![s("alert"), s("list"), j],
+        "atlas_alert_cancel" => {
+            let id = a
+                .get("id")
+                .and_then(Value::as_i64)
+                .filter(|n| *n >= 1)
+                .ok_or_else(|| bad("'id' ≥1 tam sayı"))?;
+            let mut v = vec![s("alert"), s("cancel"), j, s("--"), id.to_string()];
+            if let Some(r) = opt_text(a, "reason", 500)? {
+                v.push(s(r));
+            }
+            v
+        }
+        _ => return Err(bad(format!("bilinmeyen araç: {name}"))),
+    })
 }
 
 #[cfg(test)]
@@ -598,7 +703,7 @@ mod tests {
 
     #[test]
     fn her_arac_alt_komutla_baslar_ve_json() {
-        let ok_args = json!({"period":"daily","name":"x","id":"x","reason":"neden","scope":"global","text":"t","milestone":"m1","side":"buy","size":"0.01","stop":"60000"});
+        let ok_args = json!({"period":"daily","name":"x","id":"x","reason":"neden","scope":"global","text":"t","milestone":"m1","side":"buy","size":"0.01","stop":"60000","condition":"price_above","price":"70000"});
         for t in TOOLS {
             let props = t.input_schema()["properties"].as_object().cloned().unwrap();
             let mut a = Map::new();
@@ -607,7 +712,7 @@ mod tests {
                     a.insert(k.clone(), v.clone());
                 }
             }
-            if t.name == "atlas_approvals_show" {
+            if t.name == "atlas_approvals_show" || t.name == "atlas_alert_cancel" {
                 a.insert("id".into(), json!(3));
             }
             if t.name == "atlas_hypothesis_submit" {
@@ -775,5 +880,79 @@ mod tests {
                 "events", "--json", "--since", "seq:42", "--prio", "high", "--limit", "10"
             ]
         );
+    }
+
+    #[test]
+    fn alarm_araclari() {
+        assert_eq!(
+            r(
+                "atlas_alert_set",
+                json!({"condition":"price_above","price":"70250.5","expiry_hours":48,"note":"--home=/tmp kırılım"}),
+            )
+            .unwrap(),
+            [
+                "alert",
+                "add",
+                "--json",
+                "--above",
+                "70250.5",
+                "--expiry-hours",
+                "48",
+                "--",
+                "--home=/tmp kırılım"
+            ]
+        );
+        assert_eq!(
+            r(
+                "atlas_alert_set",
+                json!({"condition":"price_below","price":"65000"})
+            )
+            .unwrap(),
+            ["alert", "add", "--json", "--below", "65000"]
+        );
+        assert_eq!(
+            r(
+                "atlas_alert_set",
+                json!({"condition":"session_open","session":"ny"})
+            )
+            .unwrap(),
+            ["alert", "add", "--json", "--session", "ny"]
+        );
+        assert_eq!(
+            r("atlas_alerts", json!({})).unwrap(),
+            ["alert", "list", "--json"]
+        );
+        assert_eq!(
+            r(
+                "atlas_alert_cancel",
+                json!({"id": 12, "reason": "gerek kalmadı"})
+            )
+            .unwrap(),
+            ["alert", "cancel", "--json", "--", "12", "gerek kalmadı"]
+        );
+        assert_eq!(
+            r("atlas_alert_cancel", json!({"id": 12})).unwrap(),
+            ["alert", "cancel", "--json", "--", "12"]
+        );
+        // Kötü girdiler: koşul/fiyat eksik ya da çelişkili, bilinmeyen seans, sınır dışı süre, kimlik metin.
+        for bad in [
+            json!({}),
+            json!({"condition":"price_above"}),
+            json!({"condition":"price_above","price":"7e4"}),
+            json!({"condition":"price_above","price":"--home"}),
+            json!({"condition":"price_above","price":"70000","session":"ny"}),
+            json!({"condition":"session_open"}),
+            json!({"condition":"session_open","session":"tokyo"}),
+            json!({"condition":"session_open","session":"ny","price":"70000"}),
+            json!({"condition":"session_open","session":"ny","expiry_hours":5}),
+            json!({"condition":"price_below","price":"65000","expiry_hours":169}),
+            json!({"condition":"price_below","price":"65000","note":"a\nb"}),
+            json!({"condition":"buy","price":"65000"}),
+        ] {
+            assert!(r("atlas_alert_set", bad.clone()).is_err(), "{bad}");
+        }
+        assert!(r("atlas_alert_cancel", json!({"id": "12"})).is_err());
+        assert!(r("atlas_alert_cancel", json!({"id": 0})).is_err());
+        assert!(r("atlas_alerts", json!({"x": 1})).is_err());
     }
 }

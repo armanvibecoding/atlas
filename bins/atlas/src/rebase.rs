@@ -18,6 +18,8 @@ pub const CLI_ONLY_KINDS: &[EventKind] = &[
     EventKind::OperatorNote,
     EventKind::KillReset,
     EventKind::Calibration,
+    EventKind::GrokAlertSet,
+    EventKind::GrokAlertCancelled,
 ];
 
 #[derive(Debug, Clone, serde::Serialize)]

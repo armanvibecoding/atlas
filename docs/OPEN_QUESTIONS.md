@@ -114,3 +114,22 @@ M4 kalibrasyon kabulü sentetik gözlemle geçti. Gerçek paper/canlı dolum anc
 Altyapı ve testler hazır; arama döngüsü şimdilik genomları kullanıyor. Meta-model sarmalı bir aday yine gauntlet'ten
 geçmeli (sicile yazılır).
 
+## 2026-11-02 — maker/taker ve Grok alarmları
+
+### 24. Hedef (take-profit) limitleri maker mı sayılsın? — **karar bekliyor**
+Sim şu an yalnız kitapta bekleyip dolan limit **girişi** maker (%0,02) sayıyor; hedef limitleri (genomlarda
+`target_r`, Grok'ta `target`) bilinçli olarak taker (%0,05). Gerçekte reduce-only LIMIT hedef emri kitapta bekler ve
+Binance'te maker öder. Maker sayılırsa gidiş-dönüş maliyeti hedefle kapanan işlemlerde %0,10 → %0,07'ye iner;
+gauntlet sonuçları (özellikle kapı 2/7) değişir ve önceki denemelerle karşılaştırılabilirlik bozulur (fill-model
+sürümü artırılmalı). Karar Arman'ın.
+
+### 25. BarFill'de gap'le dolan bekleyen limit
+Bekleyen limit girişi, bar limitin ötesinden açılırsa (gap) **açılış fiyatından** (limitten iyi) dolar; gerçekte
+kitaptaki emir kendi fiyatından dolardı. BTC 1m'de açılış ≈ önceki kapanış olduğu için etkisi küçük, ama iyimser.
+Değiştirmek hedef limitlerini de etkiler (genom sonuçları) → #24 ile birlikte karar.
+
+### 26. Seans alarmlarında tatil takvimi yok
+`alert add --session ny|london` hafta içi her gün tetiklenir; NYSE/LSE tatillerini bilmez (#6 ile aynı kök: tatiller
+uydurulmaz, resmi takvimden girilmeli). London açılışı Arman'ın tanımıyla sabit 07:00 UTC (yaz/kış farkı yok);
+Londra yerel 08:00 isteniyorsa `alerts.rs` SESSIONS tablosunda saat dilimi `Europe/London` yapılır.
+

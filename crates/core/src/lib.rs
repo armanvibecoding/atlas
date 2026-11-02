@@ -10,7 +10,7 @@ pub mod units;
 
 pub use calendar::{Calendar, SessionSpec};
 pub use events::{Event, EventKind, Priority};
-pub use instrument::{Instrument, InstrumentId, InstrumentTable};
+pub use instrument::{Instrument, InstrumentId, InstrumentTable, Liquidity};
 pub use intent::{Action, EntryType, Fill, FillReason, Intent, Side, StrategyId};
 pub use market::{Bar, FeedStatus, MarketEvent, MarketPayload, Quote, Trade};
 pub use strategy::{AccountView, Ctx, MarketHistory, PositionView, SessionView, Strategy};

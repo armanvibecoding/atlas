@@ -2,6 +2,7 @@
 # - tick_size / tick_value / lot_size: borsa kontrat spesifikasyonu. Binance değerleri her çekimde
 #   exchangeInfo ile otomatik doğrulanır (uyuşmazsa çekim durur).
 # - costs: TEK YÖN (giriş veya çıkış), kontrat başına. Kaynaklar aşağıda; 2026-10-31'de internetten teyit.
+#   fee_rate_percent taker oranıdır; maker_fee_rate_percent isteğe bağlı (boşsa her dolum taker).
 # - exposure_group / exposure_weight: net maruziyet ve ağırlıklı kontrat sayımı (mini=1, mikro=0.1).
 #
 # CME maliyet modeli (genel/perakende, belirli bir prop firması değil):
@@ -116,7 +117,12 @@ slippage_ticks = ""
 # ---- Binance USDⓈ-M perpetual (ücretsiz veri). 1 lot = lot_size kadar dayanak. ----
 # tick_value = tick_size × lot_size (BTC: 0.1 × 0.001 = 0.0001 USDT; 1 USDT = 1 USD kabul)
 # Ücret: normal kullanıcı (VIP 0) taker %0.05 / maker %0.02 — Binance resmi destek makalesi
-# 360033544231 ile teyit (2026-10-31). Karamsar olmak için tüm dolumlar taker sayılır.
+# 360033544231 ("a Regular User's maker fee is 0.02% and a Regular User's taker fee is 0.05%",
+# makale güncelleme tarihi 2026-05-01) ile teyit: 2026-10-31 ve tekrar 2026-11-02. BNB ile ödeme
+# indirimi (%10) uygulanmaz (paper hesapta BNB yok, karamsar).
+# fee_rate_percent = taker: piyasa, stop, verildiği anda marketable limit ve tüm çıkışlar (hedef dahil).
+# maker_fee_rate_percent = maker: verildiği anda marketable OLMAYAN, kitapta bekleyip dolan limit GİRİŞİ.
+# Genomlar piyasa girişi kullandığı için araştırma sonuçları değişmez (crates/gauntlet/tests/maker_fee.rs).
 [[instrument]]
 symbol = "BTCUSDT"
 venue = "binance"
@@ -129,6 +135,7 @@ exposure_group = "crypto_btc"
 exposure_weight = "0.001"
 [instrument.costs]
 fee_rate_percent = "0.05"
+maker_fee_rate_percent = "0.02"
 slippage_ticks = "1"   # ÖLÇÜLDÜ 2026-10-31: atlas data measure-slippage (aggTrades, 200 pencere/24 sa), yarım spread ort. yukarı yuvarlandı
 
 [[instrument]]
@@ -143,4 +150,5 @@ exposure_group = "crypto_eth"
 exposure_weight = "0.001"
 [instrument.costs]
 fee_rate_percent = "0.05"
+maker_fee_rate_percent = "0.02"
 slippage_ticks = "1"   # ÖLÇÜLDÜ 2026-10-31: atlas data measure-slippage (aggTrades, 200 pencere/24 sa), yarım spread ort. yukarı yuvarlandı

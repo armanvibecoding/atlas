@@ -9,20 +9,26 @@
 //! 6. Olay geçmişe eklenir; stratejiler `Ctx` ile çağrılır; her `Intent` `RiskGate`'ten geçer.
 //!
 //! Kesinti olayı (`Feed`) fiyat değildir: emir eşleşmez, fiyat güncellenmez (ders §9.2).
+//!
+//! Ücret tarafı (maker/taker): verildiği anda son fiyata göre karşı tarafa değmeyen (marketable
+//! olmayan) ve sonra kitapta bekleyip dolan limit **giriş** emri maker oranını öder
+//! (`instruments.toml` `maker_fee_rate_percent`; tanımlı değilse taker). Piyasa, stop, verildiği anda
+//! marketable olan limit ve motorun çıkış emirleri (stop, hedef, zorunlu çıkış) taker öder. Hedef
+//! (take-profit) limitleri bilinçli olarak taker sayılır (karamsar; araştırma sonuçları değişmesin).
 
 use crate::fill::{BarScope, FillModel, OrderKind, Role, Trigger, WorkingOrder};
 use atlas_core::strategy::{AccountView, PositionView, SessionView};
 use atlas_core::{
     Action, Ctx, EntryType, Event, EventKind, FeedStatus, Fill, FillReason, Instrument,
-    InstrumentId, Intent, MarketEvent, MarketHistory, MarketPayload, Money, Price, Qty, Side,
-    Strategy, StrategyId, UnixNanos,
+    InstrumentId, Intent, Liquidity, MarketEvent, MarketHistory, MarketPayload, Money, Price, Qty,
+    Side, Strategy, StrategyId, UnixNanos,
 };
 use atlas_risk::{
     PendingEntry, RiskEnv, RiskGate, RiskState, Verdict, WEEKEND_FLATTEN_LEAD_MIN, risk_entry_ref,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +208,8 @@ pub struct Engine {
     history: MarketHistory,
     orders: BTreeMap<u64, WorkingOrder>,
     entry_meta: BTreeMap<u64, EntryMeta>,
+    /// Verildiği anda marketable olmayan (kitapta bekleyen) limit giriş emirleri: dolunca maker ücreti.
+    resting_entries: BTreeSet<u64>,
     open: BTreeMap<PosKey, OpenRec>,
     time_exit: BTreeMap<PosKey, UnixNanos>,
     cost_checked: BTreeMap<InstrumentId, i64>,
@@ -232,6 +240,7 @@ impl Engine {
             state,
             orders: BTreeMap::new(),
             entry_meta: BTreeMap::new(),
+            resting_entries: BTreeSet::new(),
             open: BTreeMap::new(),
             time_exit: BTreeMap::new(),
             cost_checked: BTreeMap::new(),
@@ -389,6 +398,7 @@ impl Engine {
             if let Some(o) = self.orders.remove(&id) {
                 self.model.order_closed(id);
                 self.entry_meta.remove(&id);
+                self.resting_entries.remove(&id);
                 self.state.cancel_pending(&o.strategy, o.instrument);
             }
         }
@@ -482,8 +492,14 @@ impl Engine {
         };
         let gate = self.gate();
         let inst = Self::instrument(&gate, o.instrument)?;
+        // Kitapta bekleyip dolan limit girişi maker; diğer her dolum taker (modül belgesi).
+        let liquidity = if self.resting_entries.remove(&o.id) {
+            Liquidity::Maker
+        } else {
+            Liquidity::Taker
+        };
         let fee = inst
-            .fee(t.price, Qty(o.qty))
+            .fee_for(t.price, Qty(o.qty), liquidity)
             .map_err(|e| SimError::CostMissing(e.to_string()))?;
         let fee = Money(fee.0.saturating_mul(self.cfg.fee_mult_milli) / 1000);
         let slippage_cost = inst.tick_value * ((t.price - t.reference).abs() * i64::from(o.qty));
@@ -640,6 +656,7 @@ impl Engine {
             self.orders.remove(&id);
             self.model.order_closed(id);
             self.entry_meta.remove(&id);
+            self.resting_entries.remove(&id);
         }
         self.state.cancel_pending(&key.0, key.1);
     }
@@ -764,6 +781,14 @@ impl Engine {
                             stop: stop_loss,
                         },
                     );
+                    // Verildiği anda marketable mı? Son fiyat bilinmiyorsa karamsar: taker.
+                    let resting = match (entry, self.state.last_price(intent.instrument)) {
+                        (EntryType::Limit(p), Some(last)) => match side {
+                            Side::Buy => p < last,
+                            Side::Sell => p > last,
+                        },
+                        _ => false,
+                    };
                     let id = self.new_order(
                         intent.strategy,
                         intent.instrument,
@@ -774,6 +799,9 @@ impl Engine {
                         intent.ts,
                         entry_expiry,
                     );
+                    if resting {
+                        self.resting_entries.insert(id);
+                    }
                     self.entry_meta.insert(
                         id,
                         EntryMeta {
@@ -843,5 +871,222 @@ impl Engine {
         self.orders.clear();
         self.result.final_balance = self.state.balance;
         Ok(self.result)
+    }
+}
+
+#[cfg(test)]
+mod maker_taker_tests {
+    //! Maker/taker ücret ayrımı: kitapta bekleyen limit girişi maker, geri kalan her dolum taker.
+    use super::*;
+    use crate::fill::BarFill;
+    use crate::validation::{RandomEntry, VALIDATION_CALENDAR, VALIDATION_POLICY, VALIDATION_PROP};
+    use atlas_core::units::NANOS_PER_MIN;
+    use atlas_core::{Bar, Calendar, InstrumentTable};
+    use atlas_risk::{PropRules, RiskPolicy};
+
+    /// BTCUSDT benzeri: tick 0.1, lot 0.001, taker %0,05; `maker` verilirse maker oranı.
+    fn env(maker: Option<&str>) -> RiskEnv {
+        let maker_line = maker
+            .map(|m| format!("maker_fee_rate_percent = \"{m}\"\n"))
+            .unwrap_or_default();
+        let inst = format!(
+            "[[instrument]]\nsymbol = \"BTCUSDT\"\nvenue = \"binance\"\nkind = \"perpetual\"\n\
+             tick_size = \"0.1\"\ntick_value_usd = \"0.0001\"\nlot_size = \"0.001\"\nsession = \"always\"\n\
+             [instrument.costs]\nfee_rate_percent = \"0.05\"\n{maker_line}slippage_ticks = \"1\"\n"
+        );
+        RiskEnv {
+            rules: PropRules::from_toml_str(VALIDATION_PROP).unwrap(),
+            policy: RiskPolicy::from_toml_str(VALIDATION_POLICY).unwrap(),
+            instruments: InstrumentTable::from_toml_str(&inst).unwrap(),
+            calendar: Calendar::from_toml_str(VALIDATION_CALENDAR).unwrap(),
+        }
+    }
+
+    /// Belirli bar sırasında belirli niyeti üreten betik strateji.
+    struct Script {
+        id: StrategyId,
+        n: usize,
+        plan: Vec<(usize, Action)>,
+    }
+
+    impl Strategy for Script {
+        fn id(&self) -> &StrategyId {
+            &self.id
+        }
+        fn on_event(&mut self, _ctx: &Ctx<'_>, ev: &MarketEvent) -> Vec<Intent> {
+            let i = self.n;
+            self.n += 1;
+            self.plan
+                .iter()
+                .filter(|(k, _)| *k == i)
+                .map(|(_, a)| Intent {
+                    strategy: self.id.clone(),
+                    instrument: InstrumentId(0),
+                    ts: ev.ts,
+                    action: a.clone(),
+                })
+                .collect()
+        }
+    }
+
+    /// Fiyatlar tick cinsinden (78050.0 = 780_500).
+    fn bar(i: u64, o: i64, h: i64, l: i64, c: i64) -> MarketEvent {
+        MarketEvent::bar(
+            InstrumentId(0),
+            Bar {
+                open_ts: UnixNanos(i * NANOS_PER_MIN),
+                close_ts: UnixNanos((i + 1) * NANOS_PER_MIN),
+                open: Price(o),
+                high: Price(h),
+                low: Price(l),
+                close: Price(c),
+                volume: 10,
+                buy_volume: 5,
+                trades: 1,
+            },
+        )
+    }
+
+    fn open(side: Side, qty: i32, entry: EntryType, stop: i64) -> Action {
+        Action::Open {
+            side,
+            qty,
+            entry,
+            stop_loss: Price(stop),
+            take_profit: None,
+            time_exit: None,
+            entry_expiry: None,
+        }
+    }
+
+    fn run(env: RiskEnv, plan: Vec<(usize, Action)>, bars: &[MarketEvent]) -> SimResult {
+        let engine = Engine::new(
+            Arc::new(RiskGate::new(env)),
+            Arc::new(BarFill::default()),
+            SimConfig::default(),
+            UnixNanos(0),
+        );
+        let mut s: Vec<Box<dyn Strategy>> = vec![Box::new(Script {
+            id: StrategyId::new("s"),
+            n: 0,
+            plan,
+        })];
+        engine.run(bars.iter().cloned(), &mut s).unwrap()
+    }
+
+    fn fill(r: &SimResult, reason: FillReason) -> Fill {
+        r.fills
+            .iter()
+            .find(|f| f.reason == reason)
+            .cloned()
+            .unwrap_or_else(|| panic!("{reason:?} dolumu yok: {:?}", r.fills))
+    }
+
+    /// Bar 0 kapanışı 78100.0; bar 2 78050.0'ın içinden geçer; bar 3 stopu (77900.0) vurur.
+    fn bars() -> Vec<MarketEvent> {
+        vec![
+            bar(0, 781_000, 781_050, 780_950, 781_000),
+            bar(1, 781_000, 781_020, 780_700, 780_800),
+            bar(2, 780_800, 780_900, 780_400, 780_600),
+            bar(3, 780_600, 780_600, 778_000, 778_500),
+        ]
+    }
+
+    /// Grok'un 2 BTC işlemi: 78050.0 alış limiti, son fiyat 78100.0 (verildiği anda marketable değil).
+    fn grok_plan() -> Vec<(usize, Action)> {
+        vec![(
+            0,
+            open(Side::Buy, 2000, EntryType::Limit(Price(780_500)), 779_000),
+        )]
+    }
+
+    #[test]
+    fn bekleyen_limit_giris_maker_oder() {
+        let r = run(env(Some("0.02")), grok_plan(), &bars());
+        let f = fill(&r, FillReason::Entry);
+        assert_eq!(f.price, Price(780_500), "limit fiyatından, kaymasız");
+        // 2 BTC × 78050 = $156.100 notional; maker %0,02 → $31,22
+        assert_eq!(f.fee, Money(31_220_000));
+        // Maker alanı boş → eski davranış: taker %0,05 → $78,05 (VPS journal'daki ücretle aynı).
+        let old = run(env(None), grok_plan(), &bars());
+        assert_eq!(fill(&old, FillReason::Entry).fee, Money(78_050_000));
+    }
+
+    #[test]
+    fn marketable_limit_ve_piyasa_taker_oder() {
+        // Alış limiti 78110.0 ≥ son fiyat 78100.0 → verildiği anda marketable → taker.
+        let marketable = vec![(
+            0,
+            open(Side::Buy, 2000, EntryType::Limit(Price(781_100)), 779_000),
+        )];
+        let r = run(env(Some("0.02")), marketable, &bars());
+        let f = fill(&r, FillReason::Entry);
+        assert_eq!(f.price, Price(781_000), "açılıştan (limitten iyi) dolar");
+        assert_eq!(f.fee, Money(78_100_000), "taker %0,05");
+        // Piyasa emri: açılış + 1 tick kayma, taker.
+        let market = vec![(0, open(Side::Buy, 2000, EntryType::Market, 779_000))];
+        let r = run(env(Some("0.02")), market, &bars());
+        let f = fill(&r, FillReason::Entry);
+        assert_eq!(f.price, Price(781_001));
+        assert_eq!(f.fee, Money(78_100_100), "2 × 78100.1 × %0,05");
+    }
+
+    #[test]
+    fn stop_cikisi_taker_oder() {
+        let r = run(env(Some("0.02")), grok_plan(), &bars());
+        let stop = fill(&r, FillReason::StopLoss);
+        // Stop 77900.0, satış yönünde 1 tick kayma → 77899.9; taker %0,05 → $77,8999 (journal'daki gibi)
+        assert_eq!(stop.price, Price(778_999));
+        assert_eq!(stop.fee, Money(77_899_900));
+        assert_eq!(r.trades.len(), 1);
+        assert_eq!(r.trades[0].fees, Money(31_220_000 + 77_899_900));
+    }
+
+    #[test]
+    fn stop_giris_taker_oder() {
+        let plan = vec![(
+            0,
+            open(Side::Sell, 1000, EntryType::Stop(Price(780_700)), 782_000),
+        )];
+        let e = env(Some("0.02"));
+        let inst = e.instruments.get("BTCUSDT").unwrap().clone();
+        let r = run(e, plan, &bars());
+        let f = fill(&r, FillReason::Entry);
+        assert_eq!(f.fee, inst.fee(f.price, Qty(1000)).unwrap());
+    }
+
+    /// Piyasa girişli + hedef limitli stratejiler (genomlar böyle) maker oranından etkilenmez.
+    #[test]
+    fn piyasa_girisli_stratejiler_degismez() {
+        let bars = crate::synthetic::ar_bars(11, 3000, UnixNanos(0), 0.1, 40.0, Price(700_000));
+        let evs: Vec<MarketEvent> = bars
+            .iter()
+            .map(|b| MarketEvent::bar(InstrumentId(0), *b))
+            .collect();
+        let go = |maker: Option<&str>| {
+            let engine = Engine::new(
+                Arc::new(RiskGate::new(env(maker))),
+                Arc::new(BarFill::default()),
+                SimConfig::default(),
+                UnixNanos(0),
+            );
+            let mut s: Vec<Box<dyn Strategy>> = vec![Box::new(RandomEntry::new(
+                7,
+                InstrumentId(0),
+                0.05,
+                300,
+                600,
+                30 * NANOS_PER_MIN,
+            ))];
+            engine.run(evs.iter().cloned(), &mut s).unwrap()
+        };
+        let a = go(None);
+        let b = go(Some("0.02"));
+        assert!(a.trades.len() > 20, "{}", a.trades.len());
+        assert_eq!(
+            a.hash(),
+            b.hash(),
+            "maker oranı piyasa girişlerini değiştirmemeli"
+        );
     }
 }

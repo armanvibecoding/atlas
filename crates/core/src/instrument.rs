@@ -39,6 +39,14 @@ pub enum InstrumentKind {
     Spot,
 }
 
+/// Dolumun likidite tarafı: kitaba likidite koyan (maker) ya da kitaptan alan (taker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Liquidity {
+    Taker,
+    Maker,
+}
+
 /// İşlem maliyeti tanımı. `None` = doldurulmadı.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CostSpec {
@@ -46,8 +54,13 @@ pub struct CostSpec {
     pub commission_per_contract: Option<Money>,
     /// Kontrat başına, tek yön borsa/regülasyon ücreti.
     pub exchange_fee_per_contract: Option<Money>,
-    /// Oransal ücret (kripto/CFD), tek yön, notional üzerinden.
+    /// Oransal ücret (kripto/CFD), tek yön, notional üzerinden. **Taker** oranıdır (piyasa, stop,
+    /// verildiği anda karşı fiyata değen limit); maker oranı tanımlı değilse her dolum bunu öder.
     pub fee_rate: Option<CentiBps>,
+    /// Maker oranı (isteğe bağlı): verildiği anda karşı fiyata değmeyen, kitapta bekleyip dolan limit
+    /// GİRİŞ emri bunu öder. `None` = ayrım yok, her dolum `fee_rate` (eski davranış).
+    #[serde(default)]
+    pub maker_fee_rate: Option<CentiBps>,
     /// Varsayılan kayma (tick, tek yön, piyasa/stop emirlerinde).
     pub slippage_ticks: Option<i64>,
 }
@@ -114,9 +127,20 @@ impl Instrument {
         Money(clamp_i128(v.abs()))
     }
 
-    /// Tek yön işlem ücreti (komisyon + borsa ücreti + oransal ücret). Kayma hariç.
-    /// Herhangi bir gerekli alan doldurulmadıysa hata.
+    /// Tek yön **taker** işlem ücreti (komisyon + borsa ücreti + oransal ücret). Kayma hariç.
+    /// Herhangi bir gerekli alan doldurulmadıysa hata. Risk kapısı bunu kullanır (karamsar).
     pub fn fee(&self, price: Price, qty: Qty) -> Result<Money, InstrumentError> {
+        self.fee_for(price, qty, Liquidity::Taker)
+    }
+
+    /// Likidite tarafına göre tek yön ücret. Maker dolumda oransal kısım `maker_fee_rate`'ten gelir
+    /// (tanımlı değilse taker oranı); kontrat başı komisyon/borsa ücreti iki tarafta aynıdır.
+    pub fn fee_for(
+        &self,
+        price: Price,
+        qty: Qty,
+        liquidity: Liquidity,
+    ) -> Result<Money, InstrumentError> {
         let c = &self.costs;
         let n = i64::from(qty.abs());
         let has_any = c.commission_per_contract.is_some()
@@ -135,7 +159,11 @@ impl Instrument {
         if let Some(m) = c.exchange_fee_per_contract {
             total += m * n;
         }
-        if let Some(r) = c.fee_rate {
+        let rate = match liquidity {
+            Liquidity::Maker => c.maker_fee_rate.or(c.fee_rate),
+            Liquidity::Taker => c.fee_rate,
+        };
+        if let Some(r) = rate {
             total += r.apply(self.notional(price, qty));
         }
         Ok(total)
@@ -218,6 +246,8 @@ struct RawCosts {
     #[serde(default)]
     fee_rate_percent: String,
     #[serde(default)]
+    maker_fee_rate_percent: String,
+    #[serde(default)]
     slippage_ticks: String,
 }
 
@@ -278,12 +308,24 @@ impl InstrumentTable {
                 } else {
                     Some(CentiBps::parse_percent(&r.costs.fee_rate_percent).map_err(unit)?)
                 },
+                maker_fee_rate: if r.costs.maker_fee_rate_percent.trim().is_empty() {
+                    None
+                } else {
+                    Some(CentiBps::parse_percent(&r.costs.maker_fee_rate_percent).map_err(unit)?)
+                },
                 slippage_ticks: if r.costs.slippage_ticks.trim().is_empty() {
                     None
                 } else {
                     Some(crate::units::parse_scaled(&r.costs.slippage_ticks, 0).map_err(unit)?)
                 },
             };
+            // Maker oranı yalnız taker oranının yanında anlamlı (tek başına "her dolum maker" olurdu).
+            if costs.maker_fee_rate.is_some() && costs.fee_rate.is_none() {
+                return Err(InstrumentError::Missing {
+                    symbol: sym,
+                    field: "fee_rate_percent (maker_fee_rate_percent tek başına tanımlanamaz)",
+                });
+            }
             let inst = Instrument {
                 id: InstrumentId(0),
                 symbol: sym.clone(),
@@ -419,6 +461,41 @@ slippage_ticks = "1"
         assert_eq!(btc.notional(p, Qty(1)), Money::from_usd(60));
         // %0,05 → $0.03
         assert_eq!(btc.fee(p, Qty(1)).unwrap(), Money(30_000));
+        // Maker oranı tanımlı değil → maker dolum da taker oranını öder (eski davranış).
+        assert_eq!(
+            btc.fee_for(p, Qty(1), Liquidity::Maker).unwrap(),
+            Money(30_000)
+        );
+    }
+
+    #[test]
+    fn maker_orani_ayri() {
+        let text = SAMPLE.replace(
+            "fee_rate_percent = \"0.05\"",
+            "fee_rate_percent = \"0.05\"\nmaker_fee_rate_percent = \"0.02\"",
+        );
+        let t = InstrumentTable::from_toml_str(&text).unwrap();
+        let btc = t.get("BTCUSDT").unwrap();
+        let p = btc.parse_price("60000").unwrap();
+        // $60 notional: taker %0,05 → $0.03, maker %0,02 → $0.012
+        assert_eq!(btc.fee(p, Qty(1)).unwrap(), Money(30_000));
+        assert_eq!(
+            btc.fee_for(p, Qty(1), Liquidity::Taker).unwrap(),
+            Money(30_000)
+        );
+        assert_eq!(
+            btc.fee_for(p, Qty(1), Liquidity::Maker).unwrap(),
+            Money(12_000)
+        );
+        // Taker oranı olmadan maker oranı tanımlanamaz.
+        let only_maker = SAMPLE.replace(
+            "fee_rate_percent = \"0.05\"",
+            "maker_fee_rate_percent = \"0.02\"",
+        );
+        assert!(matches!(
+            InstrumentTable::from_toml_str(&only_maker),
+            Err(InstrumentError::Missing { .. })
+        ));
     }
 
     #[test]

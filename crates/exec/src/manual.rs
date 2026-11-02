@@ -277,7 +277,13 @@ impl ManualAccount {
                         .find(|o| o.order.is_open() && o.status == "applied")
                     {
                         o.status = "filled".into();
-                        o.detail = json!({"price": e.payload.get("price"), "ts": e.ts});
+                        // Ücret: kitapta bekleyip dolan limit maker, diğerleri taker (sim motoru).
+                        let fee_usd = e
+                            .payload
+                            .get("fee")
+                            .and_then(Value::as_i64)
+                            .map(|f| atlas_core::Money(f).as_usd_f64());
+                        o.detail = json!({"price": e.payload.get("price"), "ts": e.ts, "fee_usd": fee_usd});
                     }
                 }
                 _ => {}

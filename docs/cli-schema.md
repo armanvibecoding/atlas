@@ -82,9 +82,11 @@ data: {"milestone": "m1", "green": bool, "passed": n, "total": n,
 
 `core::events` tek kaynaktır (spec §5). HIGH: `kill_switch, risk_breach, daily_loss_limit, prop_drawdown_near,
 consistency_headroom, feed_down, engine_failure, clock_skew, drift_alarm, approval_request, budget_exhausted,
-outbox_dead`. MEDIUM: `position_opened, position_closed, promotion, demotion, gauntlet_pass, data_quality,
-fill_divergence`. INFO: `heartbeat, experiment_done, operator_note, fill, intent_rejected, feed_up, kill_reset,
-state_checkpoint, checkpoint_rebase, config_loaded, data_pulled, day_rollover`.
+outbox_dead, price_alert` (ADR 0012: Grok'un kendi alarmı). MEDIUM: `position_opened, position_closed, promotion,
+demotion, gauntlet_pass, data_quality, fill_divergence`. INFO: `heartbeat, experiment_done, operator_note, fill,
+intent_rejected, feed_up, kill_reset, state_checkpoint, checkpoint_rebase, config_loaded, data_pulled, day_rollover, calibration,
+shadow_signal, grok_order, grok_order_applied, grok_alert_set, grok_alert_cancelled, agent_call, agent_invalid_output,
+search_cycle, stage_change`.
 
 ## Komutlar (M2–M4)
 
@@ -125,4 +127,20 @@ Günde en fazla 5 hipotez; aynı genom ikinci kez girmez. Aday adları `hip-<8he
 UTC hizalı kovalara toplanır (gauntlet ve canlı koşucu aynı toplayıcı). Boş = 1m, eski genom hash'leri değişmez.
 
 Strateji adı yalnız `[A-Za-z0-9_-]` (≤64); dosya yolu yalnız Arman'ın `gauntlet run|eval` komutlarında.
+
+## Grok alarmları (ADR 0012)
+
+| Komut | `data` |
+|---|---|
+| `alert add (--above <fiyat> \| --below <fiyat> \| --session london\|ny) [--expiry-hours 1..168] [--symbol BTCUSDT] [not…]` | `{alert_id, status: "active", alert, active_count}` |
+| `alert list` | `{active: [alarm], recent: [alarm], limits: {max_active, max_expiry_hours, default_expiry_hours, session_grace_min}}` |
+| `alert cancel <id> [gerekçe…]` | `{alert_id, status: "cancelled", seq}` |
+
+`alarm` = `{alert_id, symbol, condition: price_above|price_below|session_open, level?, session?, session_open?,
+created, expires, note, status: active|triggered|cancelled|expired, triggered_bar?, cancel_reason?}` (zamanlar
+RFC3339 UTC, fiyat ondalık metin). Ret (çıkış 2): koşul sayısı ≠ 1, fiyat son fiyatın yanlış tarafında ya da son fiyat
+yok, süre sınır dışı, seans alarmında süre, 20 etkin alarm, sembol daemon'un sembolü değil, alarm yok/etkin değil.
+
+`price_alert` olay yükü: alarm alanları + `bar_ts` (ns), `bar_time`, `bar {open, high, low, close}`, `message`,
+`account: "grok"`; anahtar `price_alert:<id>`.
 
