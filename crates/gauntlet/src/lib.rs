@@ -659,7 +659,7 @@ pub fn finish(
         passed: rep.passed,
         failed_gate: rep.failed_gate,
         trades: rep.trades_is as u64,
-        sharpe: (rep.trades_is >= 2).then_some(rep.sharpe),
+        sharpe: (rep.trades_is >= stats::MIN_TRADES_FOR_SHARPE).then_some(rep.sharpe),
         report_json: serde_json::to_string(&rep).unwrap_or_default(),
         report_md: rep.to_markdown(),
         cpu_ms,
@@ -705,7 +705,7 @@ pub fn run(
 ) -> Result<(GauntletReport, i64), GauntletError> {
     let t0 = std::time::Instant::now();
     let n = reg.trial_count()? + 1;
-    let sharpes = reg.sharpes()?;
+    let sharpes = reg.sharpes(crate::stats::MIN_TRADES_FOR_SHARPE as u64)?;
     let pre = run_pre_holdout(ctx, g, n, &sharpes)?;
     let ms = t0.elapsed().as_millis() as u64;
     finish(ctx, g, pre, reg, source, parent_id, now, ms)

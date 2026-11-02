@@ -202,6 +202,8 @@ pub struct Runner {
     strategies: Vec<Box<dyn Strategy>>,
     seen_trades: usize,
     pub drift: DriftMonitor,
+    /// Genom 1m'den büyük dilimdeyse canlı 1m barları gauntlet'tekiyle aynı toplayıcıdan geçer (kural 3).
+    agg: Option<atlas_core::market::BarAggregator>,
 }
 
 impl Runner {
@@ -240,6 +242,8 @@ impl Runner {
             })],
             seen_trades: 0,
             drift: DriftMonitor::new(expected),
+            agg: (genome.timeframe() > 1)
+                .then(|| atlas_core::market::BarAggregator::new(u64::from(genome.timeframe()))),
         })
     }
 
@@ -252,7 +256,27 @@ impl Runner {
     }
 
     /// Bir piyasa olayı işler; yeni kapanan işlemler sapma izleyicisine (R biriminde) girer.
+    /// Büyük dilimli genomda 1m bar, kovası tamamlanınca toplu bar olarak işlenir.
     pub fn step(&mut self, ev: &MarketEvent) -> Result<StepReport, atlas_sim::SimError> {
+        if let (Some(agg), atlas_core::MarketPayload::Bar(b)) = (&mut self.agg, &ev.payload) {
+            let done = agg.push(b);
+            let mut acc = StepReport {
+                events: Vec::new(),
+                new_trades: Vec::new(),
+                drift: Vec::new(),
+            };
+            for tb in done {
+                let r = self.step_inner(&MarketEvent::bar(ev.instrument, tb))?;
+                acc.events.extend(r.events);
+                acc.new_trades.extend(r.new_trades);
+                acc.drift.extend(r.drift);
+            }
+            return Ok(acc);
+        }
+        self.step_inner(ev)
+    }
+
+    fn step_inner(&mut self, ev: &MarketEvent) -> Result<StepReport, atlas_sim::SimError> {
         if ev.ts < self.engine.last_ts() {
             return Ok(StepReport {
                 events: Vec::new(),
@@ -363,5 +387,75 @@ risk_usd = 100000
         assert_eq!(early, 0, "ısınmada işlem açılmamalı");
         assert!(drift_n > 100, "{drift_n}");
         assert_eq!(drift_n, r.drift.results_r.len());
+    }
+
+    /// 15m genom canlıda 1m bar alır; işlemleri, aynı genomun önceden toplanmış 15m barlarla
+    /// koşusununkiyle birebir aynı olmalı (gauntlet ile canlı aynı yol).
+    #[test]
+    fn timeframe_runner_matches_pre_aggregated_run() {
+        let env = atlas_sim::validation::validation_env().unwrap();
+        let inst = env.instruments.by_id(InstrumentId(0)).unwrap().clone();
+        let src = r#"
+name = "m"
+instrument = "SYN"
+[entry]
+long = { gt = ["close", "open"] }
+short = { lt = ["close", "open"] }
+[exit]
+atr = 10
+stop_atr = 1.0
+target_r = 1.5
+[sizing]
+risk_usd = 100000
+"#;
+        let g1 = atlas_genome::Genome::from_toml_str(src).unwrap();
+        let g15 =
+            atlas_genome::Genome::from_toml_str(&format!("timeframe_min = 15\n{src}")).unwrap();
+        let bars =
+            atlas_sim::synthetic::ar_bars(5, 15 * 600, UnixNanos(0), 0.2, 30.0, Price(100_000));
+        let gate = Arc::new(RiskGate::new(env));
+        let mk = |g: &atlas_genome::Genome| {
+            Runner::new(
+                g,
+                &inst,
+                SessionSpec::Always,
+                Arc::clone(&gate),
+                Stage::Shadow,
+                UnixNanos(0),
+                UnixNanos(0),
+                Expected {
+                    mean_r: 0.0,
+                    sd_r: 1.0,
+                },
+            )
+            .unwrap()
+        };
+        let mut live = mk(&g15);
+        for b in &bars {
+            live.step(&MarketEvent::bar(InstrumentId(0), *b)).unwrap();
+        }
+        let mut pre = mk(&g1);
+        for b in atlas_core::market::aggregate_bars(&bars, 15) {
+            pre.step(&MarketEvent::bar(InstrumentId(0), b)).unwrap();
+        }
+        assert!(live.trades().len() > 20, "{}", live.trades().len());
+        // Strateji kimliği genom hash'ini taşır (dilim dahil) → kimlik hariç karşılaştır.
+        let key = |r: &Runner| -> Vec<_> {
+            r.trades()
+                .iter()
+                .map(|t| {
+                    (
+                        t.side,
+                        t.qty,
+                        t.entry_ts,
+                        t.entry_price,
+                        t.exit_ts,
+                        t.exit_price,
+                        t.net,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(key(&live), key(&pre));
     }
 }

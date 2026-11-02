@@ -53,15 +53,17 @@ pub fn run(
     let prior = reg.trial_count()?;
     let n_trials = prior + genomes.len() as u64;
     // 1. geçiş: temel koşu → Sharpe dağılımı (V[SR] için), paralel.
-    let base: Vec<Result<f64, GauntletError>> = genomes
+    // Sicildeki gibi: küçük örneklemin Sharpe'ı varyansa girmez.
+    let base: Vec<Result<Option<f64>, GauntletError>> = genomes
         .par_iter()
         .map(|g| {
             let t = ctx.eval.run(g, ctx.market, ctx.cost, None)?;
-            Ok(crate::stats::sharpe(&crate::eval::nets(&t)))
+            Ok((t.len() >= crate::stats::MIN_TRADES_FOR_SHARPE)
+                .then(|| crate::stats::sharpe(&crate::eval::nets(&t))))
         })
         .collect();
-    let mut sharpes = reg.sharpes()?;
-    sharpes.extend(base.iter().flatten().copied());
+    let mut sharpes = reg.sharpes(crate::stats::MIN_TRADES_FOR_SHARPE as u64)?;
+    sharpes.extend(base.iter().flatten().flatten().copied());
     // 2. geçiş: kapı 1–9, paralel; sonuçlar indeks sırasında.
     let pres: Vec<Result<crate::PreHoldout, GauntletError>> = genomes
         .par_iter()

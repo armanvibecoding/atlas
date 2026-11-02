@@ -5,6 +5,11 @@
 //!   adayın kaynağı **meta-öğrenme** ile seçilir: kaynak başına Beta(1+başarı, 1+başarısızlık) Thompson
 //!   örneklemesi; başarı = taramayı geçip gauntlet'e girmek (kapı ≥ 2'ye ulaşmak).
 //! - Bilgi tabanı: yapısal olarak çok benzer ölü fikir (mesafe < eşik) yeniden denenmez.
+//! - **Uygunluk:** `min_screen_trades`'ten az işlemli aday, t'si ne olursa olsun her geçerli
+//!   adaydan aşağıda sıralanır (işlem sayısı arttıkça yükselir). Aksi hâlde 2 özdeş işlemin
+//!   sıfır varyansı t'yi milyonlara çıkarıp elit havuzunu dejenere genomlarla dolduruyordu.
+//! - **Zaman dilimi:** tarama penceresi dilimle büyür (`screen_days × dilim`, in-sample ile sınırlı);
+//!   bar sayısı, dolayısıyla tarama maliyeti, kabaca sabit kalır.
 
 use atlas_core::UnixNanos;
 use atlas_gauntlet::eval::{Market, nets};
@@ -65,7 +70,17 @@ pub struct Screen {
 #[derive(Debug, Clone, Serialize)]
 struct Scored {
     genome: Genome,
+    /// Uygunluk ([`fitness`]); ham t değil.
     t: f64,
+}
+
+/// Elit sıralaması için uygunluk: yeterli örneklemde t, altında `-1e6 + işlem sayısı`.
+pub fn fitness(sc: &Screen, min_trades: usize) -> f64 {
+    if sc.trades >= min_trades {
+        sc.t
+    } else {
+        -1e6 + sc.trades as f64
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -88,6 +103,8 @@ pub struct Searcher {
     /// Bayes geçmişi: temel genom hash'i → (parametre oranları, skor)
     bayes: BTreeMap<String, Vec<(Vec<f64>, f64)>>,
     counter: u64,
+    /// Dilim → (kaynak veri versiyonu, tarama piyasası). Veri değişince yenilenir.
+    screens: BTreeMap<u32, (String, Market)>,
 }
 
 pub fn screen(
@@ -97,17 +114,10 @@ pub fn screen(
 ) -> Result<Screen, atlas_gauntlet::eval::EvalError> {
     let t = ctx.eval.run(g, short, ctx.cost, None)?;
     let x = nets(&t);
-    let sd = stats::sd(&x);
-    let mean = stats::mean(&x);
-    let tstat = if sd > 0.0 {
-        mean / sd * (x.len() as f64).sqrt()
-    } else {
-        0.0
-    };
     Ok(Screen {
         trades: x.len(),
-        mean,
-        t: tstat,
+        mean: stats::mean(&x),
+        t: stats::t_stat(&x),
         sharpe: stats::sharpe(&x),
     })
 }
@@ -140,7 +150,34 @@ impl Searcher {
                 .collect(),
             bayes: BTreeMap::new(),
             counter: 0,
+            screens: BTreeMap::new(),
         }
+    }
+
+    /// Genomun dilimi için tarama piyasası: 1m'de verilen `short`; daha büyük dilimde pencere
+    /// `short`'un gün sayısı × dilim (in-sample'ı aşarsa in-sample'ın kendisi, kopyasız).
+    fn screen_for(&mut self, ctx: &Context<'_>, short: &Market, tf: u32) -> Market {
+        if tf <= 1 {
+            return short.clone();
+        }
+        let key_version = format!("{}|{}", ctx.market.data_version, short.data_version);
+        if let Some((v, m)) = self.screens.get(&tf)
+            && *v == key_version
+        {
+            return m.clone();
+        }
+        let (a, b) = short.span();
+        let days = (b.0.saturating_sub(a.0) / atlas_core::units::NANOS_PER_DAY).max(1);
+        let (fa, fb) = ctx.market.span();
+        let full_days = fb.0.saturating_sub(fa.0) / atlas_core::units::NANOS_PER_DAY;
+        let want = days * u64::from(tf);
+        let m = if want >= full_days {
+            ctx.market.clone()
+        } else {
+            screen_market(ctx.market, want)
+        };
+        self.screens.insert(tf, (key_version, m.clone()));
+        m
     }
 
     /// Sicildeki geçmişten kaynak başarılarını yükler (meta-öğrenme süreklidir).
@@ -320,9 +357,13 @@ impl Searcher {
                 continue;
             }
             let t0 = std::time::Instant::now();
-            let sc = screen(ctx, short, &g)?;
+            let screen_m = self.screen_for(ctx, short, g.timeframe());
+            let sc = screen(ctx, &screen_m, &g)?;
+            let fit = fitness(&sc, self.cfg.min_screen_trades);
             rep.screened += 1;
-            rep.best_t = rep.best_t.max(sc.t);
+            if sc.trades >= self.cfg.min_screen_trades {
+                rep.best_t = rep.best_t.max(sc.t);
+            }
             reg.record(&ExperimentRecord {
                 parent_id: None,
                 source: source.clone(),
@@ -330,13 +371,13 @@ impl Searcher {
                 genome_hash: g.hash(),
                 genome_json: serde_json::to_string(&g).unwrap_or_default(),
                 tags: g.tags.clone(),
-                data_version: short.data_version.clone(),
+                data_version: screen_m.data_version.clone(),
                 fill_model: "bar_fill@v1".into(),
                 seed: ctx.seed,
                 passed: false,
                 failed_gate: Some(0),
                 trades: sc.trades as u64,
-                sharpe: (sc.trades >= 2).then_some(sc.sharpe),
+                sharpe: (sc.trades >= stats::MIN_TRADES_FOR_SHARPE).then_some(sc.sharpe),
                 report_json: serde_json::json!({"quick_screen": sc}).to_string(),
                 report_md: format!(
                     "hızlı tarama: {} işlem, t={:.2}, ort ${:.2}",
@@ -355,11 +396,11 @@ impl Searcher {
                         .map_or(g.clone(), |s| s.genome.clone()),
                     &g,
                 );
-                self.bayes.entry(b.clone()).or_default().push((r, sc.t));
+                self.bayes.entry(b.clone()).or_default().push((r, fit));
             }
             self.pop.push(Scored {
                 genome: g.clone(),
-                t: sc.t,
+                t: fit,
             });
             self.pop.sort_by(|a, b| b.t.total_cmp(&a.t));
             self.pop.truncate(self.cfg.population);
@@ -417,6 +458,30 @@ mod tests {
     use atlas_gauntlet::holdout::split;
     use atlas_risk::PropRules;
     use std::sync::Arc;
+
+    /// VPS 2026-11-02: 2 özdeş işlem t≈8 milyon verip elit havuzunu dolduruyordu.
+    #[test]
+    fn small_samples_rank_below_any_valid_screen() {
+        let degenerate = Screen {
+            trades: 2,
+            mean: 2594.7,
+            t: 8_159_419.9,
+            sharpe: 5_769_581.2,
+        };
+        let weak = Screen {
+            trades: 61,
+            mean: -22.7,
+            t: -9.5,
+            sharpe: -1.2,
+        };
+        let more = Screen {
+            trades: 40,
+            ..degenerate.clone()
+        };
+        assert!(fitness(&weak, 60) > fitness(&degenerate, 60));
+        assert!(fitness(&more, 60) > fitness(&degenerate, 60));
+        assert_eq!(fitness(&weak, 60), -9.5);
+    }
 
     #[test]
     fn cycle_records_every_screen_and_is_deterministic() {

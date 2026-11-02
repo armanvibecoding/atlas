@@ -219,12 +219,14 @@ impl Registry {
     }
 
     /// Kayıtlı tüm denemelerin işlem başı Sharpe'ları (DSR'deki V[SR] için).
-    pub fn sharpes(&self) -> Result<Vec<f64>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT sharpe FROM experiments WHERE sharpe IS NOT NULL ORDER BY id")?;
+    /// DSR'nin deneme varyansı için Sharpe'lar: yalnız en az `min_trades` işlemli denemeler.
+    /// Sicil append-only olduğundan eski küçük-örneklem kayıtları (2 işlem → Sharpe milyonlar) burada süzülür.
+    pub fn sharpes(&self, min_trades: u64) -> Result<Vec<f64>> {
+        let mut st = self.conn.prepare(
+            "SELECT sharpe FROM experiments WHERE sharpe IS NOT NULL AND trades >= ?1 ORDER BY id",
+        )?;
         let v = st
-            .query_map([], |r| r.get::<_, f64>(0))?
+            .query_map([min_trades as i64], |r| r.get::<_, f64>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(v)
     }
@@ -461,6 +463,21 @@ impl Registry {
         )
     }
 
+    /// Adı `prefix` ile başlayan deneyler (en yeni önce). `prefix` yalnız [A-Za-z0-9-] olmalı.
+    pub fn experiments_with_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<ExperimentRow>> {
+        if !prefix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Ok(Vec::new());
+        }
+        self.query_rows("WHERE name LIKE ?1", Some(&format!("{prefix}%")), limit)
+    }
+
     fn query_rows(
         &self,
         filter: &str,
@@ -552,7 +569,8 @@ mod tests {
                 .is_err()
         );
         assert_eq!(r.trial_count().unwrap(), 2);
-        assert_eq!(r.sharpes().unwrap(), vec![0.01, 0.2]);
+        assert_eq!(r.sharpes(30).unwrap(), vec![0.01, 0.2]);
+        assert!(r.sharpes(121).unwrap().is_empty());
         let s = r.summary().unwrap();
         assert_eq!(s.passed, 1);
         assert_eq!(s.failed_gate_histogram.get("2"), Some(&1));

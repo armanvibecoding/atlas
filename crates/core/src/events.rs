@@ -109,6 +109,7 @@ event_kinds! {
     FeedUp => "feed_up", Info;
     KillReset => "kill_reset", Info;
     StateCheckpoint => "state_checkpoint", Info;
+    CheckpointRebase => "checkpoint_rebase", Info;
     ConfigLoaded => "config_loaded", Info;
     DataPulled => "data_pulled", Info;
     DayRollover => "day_rollover", Info;

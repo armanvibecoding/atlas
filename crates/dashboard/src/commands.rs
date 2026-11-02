@@ -54,6 +54,14 @@ pub const READ_COMMANDS: &[ReadCommand] = &[
         title: "Grok hesabı",
     },
     ReadCommand {
+        route: "hypothesis/list",
+        argv: &["hypothesis", "list"],
+        param: Param::None,
+        query: QuerySpec::None,
+        milestone: "Grok",
+        title: "Hipotezler",
+    },
+    ReadCommand {
         route: "market",
         argv: &["market"],
         param: Param::None,
@@ -181,6 +189,10 @@ pub const EXCLUDED: &[(&str, &str)] = &[
     ),
     ("note", "yazma: journal'a operatör notu"),
     (
+        "hypothesis submit",
+        "yazma: arama kuyruğuna aday ekler (deneme sayılır)",
+    ),
+    (
         "strategy",
         "yazma: pause/demote/resume merdiveni değiştirir",
     ),
@@ -193,6 +205,7 @@ pub const EXCLUDED: &[(&str, &str)] = &[
     ),
     ("journal export", "yazma: var/exports altına dosya yazar"),
     ("journal checkpoint", "yazma, yalnız Arman"),
+    ("journal rebase", "yazma (doğrulanan çapa), yalnız Arman"),
     (
         "data pull-binance",
         "yazma + ağ: veri çeker, journal'a yazar",

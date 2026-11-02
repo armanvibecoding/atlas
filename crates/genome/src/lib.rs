@@ -103,6 +103,10 @@ pub struct Genome {
     pub instrument: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Değerlendirme zaman dilimi (dakika, [`TIMEFRAMES`]). Boş = 1m (eski genomların hash'i değişmez).
+    /// Feature'lar, ATR ve `exit.time_bars` bu dilimin barlarıyla sayılır.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeframe_min: Option<u32>,
     pub entry: Entry,
     #[serde(default)]
     pub filters: Filters,
@@ -126,6 +130,9 @@ pub struct FeatureRef {
 }
 
 pub const MAX_LAG: u32 = 50;
+
+/// İzinli zaman dilimleri (dakika). 1m'de taker ücreti kenarı yiyor (HANDOFF §3); arama 15m/1h/4h'e ağırlık verir.
+pub const TIMEFRAMES: &[u32] = &[1, 5, 15, 30, 60, 240];
 
 pub fn parse_ref(s: &str) -> Result<FeatureRef, GenomeError> {
     let (f, lag) = match s.split_once('@') {
@@ -262,7 +269,19 @@ impl Genome {
         {
             return Err(GenomeError::Invalid("filters.hours_utc 0..24".into()));
         }
+        if let Some(tf) = self.timeframe_min
+            && !TIMEFRAMES.contains(&tf)
+        {
+            return Err(GenomeError::Invalid(format!(
+                "timeframe_min {tf}: izinli {TIMEFRAMES:?}"
+            )));
+        }
         Ok(())
+    }
+
+    /// Zaman dilimi (dakika); boşsa 1.
+    pub fn timeframe(&self) -> u32 {
+        self.timeframe_min.unwrap_or(1)
     }
 
     /// Genomun kullandığı tüm feature referansları (+ stop için ATR).
@@ -319,6 +338,10 @@ impl Genome {
         if self.filters.hours_utc.is_some() {
             t.insert("filter:hours".into());
         }
+        // 1m'de belirteç yok: sicildeki eski derslerin belirteç kümeleri aynen eşleşmeye devam eder.
+        if self.timeframe() != 1 {
+            t.insert(format!("tf:{}", self.timeframe()));
+        }
         t
     }
 }
@@ -369,6 +392,19 @@ risk_usd = 1000
         let mut renamed = g.clone();
         renamed.name = "x".into();
         assert_eq!(renamed.hash(), g.hash());
+    }
+
+    #[test]
+    fn timeframe_is_optional_and_validated() {
+        let g = Genome::from_toml_str(TREND).unwrap();
+        assert_eq!(g.timeframe(), 1);
+        // Boş zaman dilimi serileştirilmez → eski genomların hash'i sicildekiyle aynı kalır.
+        assert!(!serde_json::to_string(&g).unwrap().contains("timeframe"));
+        let h = Genome::from_toml_str(&format!("timeframe_min = 60\n{TREND}")).unwrap();
+        assert_eq!(h.timeframe(), 60);
+        assert_ne!(h.hash(), g.hash());
+        assert!(structural_distance(&g, &h) > 0.0);
+        assert!(Genome::from_toml_str(&format!("timeframe_min = 7\n{TREND}")).is_err());
     }
 
     #[test]

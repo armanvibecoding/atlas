@@ -79,6 +79,8 @@ Her araç `atlas.cli/1` JSON zarfı döndürür: `{"schema":"atlas.cli/1","comma
 | `trade list` | `atlas_trades` | Kendi hesabın: bakiye, equity, bugünkü PnL, pozisyon, emir durumları (red sebebiyle), işlemler, limitler | ✓ |
 | `trade open` | `atlas_trade_open` | Kendi hesabında pozisyon aç: `side`, `size` (BTC), `stop` zorunlu; `target`, `limit`, `expiry_min` isteğe bağlı | ✓ |
 | `trade close` / `cancel` | `atlas_trade_close`, `atlas_trade_cancel` | Pozisyonu piyasadan kapat / bekleyen limit girişini iptal et | ✓ |
+| `hypothesis submit` | `atlas_hypothesis_submit` | Strateji hipotezi öner (§4.5). Fikir + kurallar; **parametreyi sistem seçer** | ✓ |
+| `hypothesis list` | `atlas_hypotheses` | Hipotezlerin durumu: kaç aday, kaçı bekliyor, en iyi sonuç / düştüğü kapı | ✓ |
 | `verify m1|m2|m3|m4` | `atlas_verify` | **Ağır** (m2 sunucuda birkaç dakika, CPU yer). Yalnız devir günü ya da Arman isteyince; aynı anda tek | ✓ |
 | `approve <id>` | — | Onay — yalnız Arman, kendi anahtarıyla | ✗ |
 | `kill-reset`, `risk set …`, `deploy` | — | Kill switch açma, limit, deploy — yalnız Arman | ✗ |
@@ -195,6 +197,21 @@ Kurallar:
 - `position_opened` / `position_closed` olayları (MEDIUM, `account: "grok"`) senin işlemlerindir; sistemin
   stratejileriyle karıştırma.
 - Günlük rapora kendi hesabını ayrı satırda yaz (§4.2).
+
+### 4.5 Strateji hipotezi önerme (`atlas_hypothesis_submit`)
+
+Sistemin arama döngüsüne kendi fikrini sokabildiğin tek yol. **Sen hipotez önerirsin, parametreyi sistem seçer.**
+
+- Alanlar: `idea` (ne ve neden), `source` (nereden: gözlem, kitap, makale), `timeframe` (1m/5m/15m/30m/1h/4h),
+  `entry` (genom koşul DSL'i), isteğe bağlı `exit` (başlangıç değerleri), `session_utc` (ör. Londra açılışı
+  `[7,10]`, NY açılışı `[13,16]`; 17:30 TSİ = kışın 14:30 UTC), `falsification` (neyin çürüteceği).
+- Sayılar yalnız başlangıçtır: sistem temel genomu ve her parametrenin ±%25 komşusunu (≤17 aday) dener.
+  **Her aday deneme sayılır** ve Deflated Sharpe çıtasını herkes için yükseltir — bu yüzden günde en fazla 5
+  hipotez; aynısını tekrar gönderemezsin. Az ve gerekçeli gönder.
+- Adaylar normal aday gibi hızlı taramadan (kapı 0) ve 10 kapılı gauntlet'ten geçer; geçerse otomatik gölgeye çıkar.
+- Sonuç: birkaç döngü sonra (kuyruk dakikada ~4 aday) `atlas_hypotheses` → `best.failed_gate`. Ölen hipotezi
+  "parametreyi değiştirip" yeniden göndermek yerine fikri değiştir.
+- 1m'de ücret kenarı yiyor (işlem başı ~0,85–1,3R); 15m/1h/4h ve seans açılışı fikirleri öncelikli.
 
 ---
 

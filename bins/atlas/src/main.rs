@@ -4,9 +4,11 @@
 mod daemon;
 mod grok;
 mod home;
+mod hypothesis;
 mod m2;
 mod m3;
 mod m4;
+mod rebase;
 mod verify;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -127,6 +129,11 @@ enum Cmd {
     Note { text: Vec<String> },
     /// Webhook'a tek test olayı gönder (§7.1 madde 4; yalnız Arman).
     WebhookTest,
+    /// Operatör strateji hipotezi: kuyruğa gönder / listele (parametreleri sistem seçer, her aday deneme sayılır).
+    Hypothesis {
+        #[command(subcommand)]
+        cmd: HypothesisCmd,
+    },
     /// Grok operatör hesabı (ayrı sanal hesap, ADR 0010): emir ver / kapat / iptal / listele.
     Trade {
         #[command(subcommand)]
@@ -238,6 +245,14 @@ enum ExperimentsCmd {
 }
 
 #[derive(Subcommand)]
+enum HypothesisCmd {
+    /// Hipotez JSON'u (argümanda ya da stdin'de). Şema: docs/cli-schema.md.
+    Submit { json: Vec<String> },
+    /// Hipotezler ve gauntlet sonuçları.
+    List,
+}
+
+#[derive(Subcommand)]
 enum JournalCmd {
     /// Baştan katlayıp checkpoint'leri doğrular.
     Replay,
@@ -245,6 +260,15 @@ enum JournalCmd {
     Export { name: String },
     /// Mevcut durumun hash'iyle checkpoint yaz.
     Checkpoint,
+    /// Eski checkpoint uyuşmazlıklarını (yalnız açıklanabilenleri) doğrulanan bir çapayla kapatır.
+    /// Geçmişi değiştirmez; açıklanamayan varsa hiçbir şey yazmaz. Yalnız Arman.
+    Rebase {
+        #[arg(long)]
+        reason: String,
+        /// Yazmadan yalnız açıklamayı göster.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -306,6 +330,9 @@ fn guard_role(cmd: &Cmd) -> Result<()> {
             Cmd::Journal {
                 cmd: JournalCmd::Checkpoint,
             } => Some("journal checkpoint"),
+            Cmd::Journal {
+                cmd: JournalCmd::Rebase { .. },
+            } => Some("journal rebase"),
             Cmd::Gauntlet { .. } => Some("gauntlet (holdout bütçesi ve deneme sayacı tüketir)"),
             Cmd::Approve { .. } => Some("approve (yalnız Arman)"),
             Cmd::Daemon { .. } => Some("daemon"),
@@ -455,6 +482,19 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
         Cmd::Kill { scope, reason } => kill(&h, out, &scope, &reason.join(" ")),
         Cmd::KillReset { scope } => kill_reset(&h, out, &scope),
         Cmd::Note { text } => note(&h, out, text),
+        Cmd::Hypothesis { cmd } => match cmd {
+            HypothesisCmd::Submit { json } => {
+                let mut t = json.join(" ");
+                if t.trim().is_empty() {
+                    std::io::stdin().read_to_string(&mut t)?;
+                }
+                if t.len() > 20_000 {
+                    bail!("hipotez en fazla 20 KB");
+                }
+                hypothesis::run_submit(&h, out, &t)
+            }
+            HypothesisCmd::List => hypothesis::run_list(&h, out),
+        },
         Cmd::Trade { cmd } => match cmd {
             TradeCmd::Open {
                 side,
@@ -729,6 +769,23 @@ fn journal(h: &Home, out: &Out, cmd: JournalCmd) -> Result<bool> {
                 json!({"seq": seq, "hash": hash}),
                 || format!("checkpoint #{seq} {hash}"),
             );
+            Ok(true)
+        }
+        JournalCmd::Rebase { reason, dry_run } => {
+            let mut j = open_journal(h)?;
+            if dry_run {
+                let (ok, bad) = rebase::explain(&j)?;
+                let fine = bad.is_empty();
+                out.emit(
+                    "journal.rebase",
+                    fine,
+                    json!({"dry_run": true, "explained": ok, "unexplained": bad}),
+                    || format!("açıklanan {} uyuşmazlık, açıklanamayan {:?}", ok.len(), bad),
+                );
+                return Ok(fine);
+            }
+            let v = rebase::rebase(&mut j, &reason, now())?;
+            out.emit("journal.rebase", true, v.clone(), || format!("{v}"));
             Ok(true)
         }
     }

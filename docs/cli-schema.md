@@ -59,8 +59,11 @@ data: {"milestone": "m1", "green": bool, "passed": n, "total": n,
        "checks": [{"name", "pass", "detail"}]}
 ```
 
-### `journal replay | export <ad> | checkpoint`
-- replay: `{"events", "checkpoints", "mismatches": [..], "final_hash"}`, tutarsızsa çıkış 1.
+### `journal replay | export <ad> | checkpoint | rebase --reason <metin> [--dry-run]`
+- replay: `{"events", "checkpoints", "mismatches": [..], "superseded": [..], "final_hash"}`, tutarsızsa çıkış 1.
+  `superseded`: sonraki doğrulanmış bir `checkpoint_rebase` çapasının kapattığı eski uyuşmazlıklar (bilgi; tutarlılığı bozmaz).
+- rebase (yalnız Arman): eski uyuşmazlıkları "bayat yazıcı" modeliyle SHA-256 düzeyinde yeniden üretebiliyorsa
+  `checkpoint_rebase` yazar → `{"written", "seq", "supersedes", "missed_events"}`; açıklanamayan biri varsa hiçbir şey yazmaz.
 - export: tutarlı anlık görüntü (SQLite backup API) → `var/exports/<ad>`; ad yalnız `[A-Za-z0-9._-]`, var olan dosyaya yazmaz.
 - Grok rolünde `--home` reddedilir.
 - checkpoint: yalnız Arman.
@@ -81,7 +84,7 @@ data: {"milestone": "m1", "green": bool, "passed": n, "total": n,
 consistency_headroom, feed_down, engine_failure, clock_skew, drift_alarm, approval_request, budget_exhausted,
 outbox_dead`. MEDIUM: `position_opened, position_closed, promotion, demotion, gauntlet_pass, data_quality,
 fill_divergence`. INFO: `heartbeat, experiment_done, operator_note, fill, intent_rejected, feed_up, kill_reset,
-state_checkpoint, config_loaded, data_pulled, day_rollover`.
+state_checkpoint, checkpoint_rebase, config_loaded, data_pulled, day_rollover`.
 
 ## Komutlar (M2–M4)
 
@@ -98,6 +101,28 @@ state_checkpoint, config_loaded, data_pulled, day_rollover`.
 | `approve <id> [--reject]` (Arman) | onay kaydı |
 | `daemon run [--replay-days N] [--max-ticks N]` (Arman/systemd) | `DaemonSummary` |
 | `verify m1..m4` | `{milestone, green, passed, total, checks: [{name, pass, detail}]}` |
+| `hypothesis submit <json>` (ya da stdin) | `{id, queued, trials_counted, daily_left, genome}` |
+| `hypothesis list` | `{hypotheses: [{id, created_ts, idea, timeframe, variants, pending, experiments, passed, best}], daily_limit}` |
+
+### Hipotez şeması (`hypothesis submit`)
+```json
+{
+  "idea": "Londra açılışında Asya aralığının üstüne kapanış devam eder",   // 10..1000 karakter
+  "source": "gözlem: 2025 BTC 15m grafikleri",                              // 3..300
+  "timeframe": "15m",                                  // 1m | 5m | 15m | 30m | 1h | 4h
+  "entry": {"long": {"cross_above": ["close", "asia_high"]}},   // genom koşul DSL'i (long/short)
+  "exit": {"atr": 14, "stop_atr": 1.5, "target_r": 2.0},        // isteğe bağlı; boşsa bu değerler
+  "session_utc": [7, 10],                               // isteğe bağlı, UTC [başlangıç, bitiş)
+  "falsification": "300+ işlemde komisyon sonrası beklenti ≤ 0" // isteğe bağlı
+}
+```
+Bilinmeyen alan reddedilir. Sayılar başlangıç noktasıdır: temel genom + her parametrenin ±%25 komşusu
+(en fazla 17 aday) `operatör:grok` kaynağıyla kuyruğa girer, aramadan önce işlenir; her aday deneme sayılır.
+Günde en fazla 5 hipotez; aynı genom ikinci kez girmez. Aday adları `hip-<8hex>-vNN`.
+
+### Genom: `timeframe_min`
+İsteğe bağlı (5, 15, 30, 60, 240). Feature'lar, ATR ve `exit.time_bars` o dilimin barlarıyla hesaplanır; 1m barlar
+UTC hizalı kovalara toplanır (gauntlet ve canlı koşucu aynı toplayıcı). Boş = 1m, eski genom hash'leri değişmez.
 
 Strateji adı yalnız `[A-Za-z0-9_-]` (≤64); dosya yolu yalnız Arman'ın `gauntlet run|eval` komutlarında.
 

@@ -170,6 +170,14 @@ pub struct Approval {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueRow {
+    pub id: i64,
+    pub note: String,
+    pub created_ts: u64,
+    pub taken: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueuedGenome {
     pub id: i64,
     pub genome_json: String,
@@ -506,6 +514,25 @@ impl Registry {
             )?;
         }
         Ok(q)
+    }
+
+    /// Bir kaynağın kuyruğa koyduğu öğeler (en yeni önce) ve alınıp alınmadıkları.
+    pub fn queued_by_source(&self, source: &str) -> Result<Vec<QueueRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT q.id, q.note, q.created_ts, q.id IN (SELECT queue_id FROM search_queue_taken)
+             FROM search_queue q WHERE q.source = ?1 ORDER BY q.id DESC",
+        )?;
+        let v = st
+            .query_map([source], |r| {
+                Ok(QueueRow {
+                    id: r.get(0)?,
+                    note: r.get(1)?,
+                    created_ts: u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
+                    taken: r.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
     }
 
     /// Kaynak başına (deneme, taramayı geçip gauntlet'te kapı ≥ 2'ye ulaşan) — meta-öğrenme.

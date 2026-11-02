@@ -1,5 +1,24 @@
 # Değişiklik günlüğü
 
+## Grok notları düzeltmeleri (2026-11-02) — ADR 0011
+
+### Düzeltildi
+- **journal**: daemon checkpoint'i CLI'nin ayrı bağlantıdan yazdığı olayları (Grok `grok_order`) görmüyordu →
+  replay 30 checkpoint'te tutarsız. Her yazım artık `BEGIN IMMEDIATE` + diskteki yeni olayları katlama ile.
+  `checkpoint_rebase` çapası + `atlas journal rebase` (yalnız Arman; yalnız açıklanabilen uyuşmazlıkları kapatır).
+- **gauntlet/search**: sıfır varyanslı Sharpe/t (2 özdeş işlem → milyonlar) 0; <30 işlemin Sharpe'ı sicile yazılmaz
+  ve DSR varyansına girmez; arama uygunluğu az işlemli adayları her geçerli adayın altına koyar.
+
+### Eklendi
+- **genome**: `timeframe_min` (5/15/30/60/240); `core::market::BarAggregator` (gauntlet ve canlı koşucu ortak).
+  Rastgele genom 15m/1h/4h ve seans açılışı pencerelerine ağırlık verir; tarama penceresi dilimle büyür.
+- **CLI/MCP**: `hypothesis submit|list`, `atlas_hypothesis_submit`, `atlas_hypotheses` (Grok'a izinli; günde 5,
+  her aday deneme sayılır).
+
+### Doğrulama
+- Gerçek VPS journal kopyası: 30/30 eski uyuşmazlık "bayat yazıcı" modeliyle SHA-256 birebir açıklandı.
+- `verify m1` 24/24, `m2` (sahte test 0/1000, 167 ms), `m3`, `m4` yerelde yeşil; clippy temiz.
+
 ## M4 — Derinlik (2026-10-31)
 
 ### Eklendi

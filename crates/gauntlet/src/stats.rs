@@ -19,10 +19,24 @@ pub fn sd(x: &[f64]) -> f64 {
     (x.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (n as f64 - 1.0)).sqrt()
 }
 
-/// İşlem başı Sharpe (yıllıklandırılmamış).
+/// Sharpe'ın anlamlı sayıldığı en az işlem. Altında sicile Sharpe yazılmaz ve DSR'nin deneme
+/// varyansına girmez (2 özdeş işlem → sd≈float gürültüsü → Sharpe milyonlar; VPS 2026-11-02).
+pub const MIN_TRADES_FOR_SHARPE: usize = 30;
+
+/// Varyans sıfırsa (ya da ortalamaya göre float gürültüsü düzeyindeyse) dejenere.
+fn degenerate_sd(s: f64, m: f64) -> bool {
+    s <= 1e-9 * m.abs().max(1.0)
+}
+
+/// İşlem başı Sharpe (yıllıklandırılmamış). Dejenere varyansta 0.
 pub fn sharpe(x: &[f64]) -> f64 {
-    let s = sd(x);
-    if s > 0.0 { mean(x) / s } else { 0.0 }
+    let (s, m) = (sd(x), mean(x));
+    if degenerate_sd(s, m) { 0.0 } else { m / s }
+}
+
+/// Ortalamanın t-istatistiği. Dejenere varyansta 0.
+pub fn t_stat(x: &[f64]) -> f64 {
+    sharpe(x) * (x.len() as f64).sqrt()
 }
 
 /// (çarpıklık, basıklık — normal = 3).
@@ -188,6 +202,18 @@ mod tests {
         assert!((k - 1.64).abs() < 1e-9);
         assert!((phi(0.0) - 0.5).abs() < 1e-12);
         assert!((phi_inv(0.975) - 1.959_964).abs() < 1e-5);
+    }
+
+    #[test]
+    fn zero_variance_is_degenerate_not_infinite() {
+        // VPS'teki 2 özdeş kazanç: float gürültüsüyle sd≈1e-13 → eski kod Sharpe ≈ 5,7 milyon.
+        let x = [2594.695533, 2594.695533 + 1e-12];
+        assert!(sd(&x) > 0.0);
+        assert_eq!(sharpe(&x), 0.0);
+        assert_eq!(t_stat(&x), 0.0);
+        assert_eq!(sharpe(&[5.0, 5.0, 5.0]), 0.0);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        assert!((t_stat(&y) - 2.5 / 1.290_994 * 2.0).abs() < 1e-5);
     }
 
     #[test]

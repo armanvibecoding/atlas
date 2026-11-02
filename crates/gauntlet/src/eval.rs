@@ -1,6 +1,7 @@
 //! Genom değerlendirici: genomu simülasyon motorunda (BarFill) çalıştırıp işlem listesi üretir.
 //! Feature sütunları `FeatureStore` önbelleğinden gelir; aynı veri üzerinde binlerce genom ucuzdur.
 
+use atlas_core::market::aggregate_bars;
 use atlas_core::{Bar, Instrument, InstrumentTable, MarketEvent, SessionSpec, Strategy, UnixNanos};
 use atlas_features::FeatureStore;
 use atlas_genome::Genome;
@@ -8,7 +9,8 @@ use atlas_genome::strategy::GenomeStrategy;
 use atlas_risk::{PropRules, RiskEnv, RiskGate, RiskPolicy};
 use atlas_sim::validation::{VALIDATION_CALENDAR, VALIDATION_POLICY, VALIDATION_PROP};
 use atlas_sim::{BarFill, Engine, SimConfig, TradeRecord};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EvalError {
@@ -36,6 +38,18 @@ impl Market {
             self.bars.first().map_or(UnixNanos::ZERO, |b| b.open_ts),
             self.bars.last().map_or(UnixNanos::ZERO, |b| b.close_ts),
         )
+    }
+
+    /// Aynı veri, `minutes`'lık barlara toplanmış hâli. Veri versiyonu dilimi taşır (feature önbelleği ayrışır).
+    pub fn at_timeframe(&self, minutes: u64) -> Market {
+        if minutes <= 1 {
+            return self.clone();
+        }
+        Market {
+            data_version: format!("{}@{minutes}m", self.data_version),
+            bars: Arc::new(aggregate_bars(&self.bars, minutes)),
+            ..self.clone()
+        }
     }
 }
 
@@ -77,9 +91,17 @@ pub fn always_calendar() -> atlas_core::Calendar {
     atlas_core::Calendar::from_toml_str(VALIDATION_CALENDAR).unwrap_or_default()
 }
 
+/// Toplu bar önbelleği sınırı (veri versiyonu × dilim); aşılınca boşaltılır.
+const TF_CACHE_MAX: usize = 32;
+
+/// (veri versiyonu, dilim dakikası) → toplu barlar.
+type TfCache = BTreeMap<(String, u64), Arc<Vec<Bar>>>;
+
 pub struct Evaluator<'a> {
     pub gate: Arc<RiskGate>,
     pub store: &'a FeatureStore,
+    /// (veri versiyonu, dilim) → toplu barlar. Binlerce genom aynı toplamayı yeniden yapmasın.
+    tf_cache: Mutex<TfCache>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -87,7 +109,31 @@ impl<'a> Evaluator<'a> {
         Evaluator {
             gate: Arc::new(RiskGate::new(env)),
             store,
+            tf_cache: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Genomun zaman dilimindeki piyasa (önbellekli).
+    fn market_for(&self, g: &Genome, m: &Market) -> Market {
+        let tf = u64::from(g.timeframe());
+        if tf <= 1 {
+            return m.clone();
+        }
+        let key = (m.data_version.clone(), tf);
+        let mut cache = self.tf_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(b) = cache.get(&key) {
+            return Market {
+                data_version: format!("{}@{tf}m", m.data_version),
+                bars: Arc::clone(b),
+                ..m.clone()
+            };
+        }
+        let out = m.at_timeframe(tf);
+        if cache.len() >= TF_CACHE_MAX {
+            cache.clear();
+        }
+        cache.insert(key, Arc::clone(&out.bars));
+        out
     }
 
     /// Genomu çalıştırır. `from`: yalnız bu andan sonra girilen işlemler döner (holdout).
@@ -98,6 +144,7 @@ impl<'a> Evaluator<'a> {
         cost: Cost,
         from: Option<UnixNanos>,
     ) -> Result<Vec<TradeRecord>, EvalError> {
+        let m = &self.market_for(g, m);
         let specs = g.feature_specs()?;
         let shared = self
             .store

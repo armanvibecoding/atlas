@@ -3,6 +3,11 @@
 //! - Olaylar SQLite'a eklenir; `UPDATE`/`DELETE` tetikleyicilerle **veritabanı düzeyinde** reddedilir.
 //! - Durum ([`Projection`]) olaylardan katlanarak üretilir. Motor ara ara `state_checkpoint` olayı
 //!   yazar (projeksiyonun hash'i); [`Journal::replay`] baştan katlayıp her checkpoint'i doğrular.
+//! - Aynı dosyaya birden çok süreç yazar (daemon + CLI). Her yazım, kilitli işlemin içinde önce diskte
+//!   olup bellekte olmayan olayları katlar; checkpoint hash'i böylece kendinden önceki **tüm** olayları
+//!   kapsar.
+//! - `checkpoint_rebase`: eski (yakalama öncesi) checkpoint uyuşmazlıklarını geçmişi değiştirmeden
+//!   kapatan, kendisi de doğrulanan yeni çapa (bkz. [`Journal::rebase`]).
 //! - Dışa aktarma SQLite backup API'siyle tutarlı anlık görüntüden yapılır (ders §9.3).
 
 use atlas_core::{Event, EventKind, Priority, UnixNanos};
@@ -94,7 +99,10 @@ fn str_field(v: &serde_json::Value, k: &str) -> String {
 impl Projection {
     pub fn apply(&mut self, seq: i64, e: &Event) {
         self.last_seq = seq;
-        if e.kind == EventKind::StateCheckpoint {
+        if matches!(
+            e.kind,
+            EventKind::StateCheckpoint | EventKind::CheckpointRebase
+        ) {
             // Checkpoint projeksiyonu değiştirmez (kendini sayarsa hash kendine bağımlı olurdu).
             return;
         }
@@ -159,6 +167,9 @@ pub struct ReplayReport {
     pub events: u64,
     pub checkpoints: u64,
     pub mismatches: Vec<CheckpointMismatch>,
+    /// Sonraki doğrulanmış bir `checkpoint_rebase`'in kapattığı eski uyuşmazlıklar (bilgi).
+    #[serde(default)]
+    pub superseded: Vec<CheckpointMismatch>,
     pub final_hash: String,
 }
 
@@ -211,18 +222,37 @@ impl Journal {
         &self.projection
     }
 
+    /// Diskte olup projeksiyonda olmayan olayları (başka süreçlerin yazdıkları) katlar. Bunlar zaten
+    /// kalıcı olduğundan işlem sonra geri alınsa da projeksiyon doğru kalır.
+    fn catch_up(conn: &Connection, p: &mut Projection) -> Result<()> {
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, ts, kind, priority, key, payload FROM events WHERE seq > ?1 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map([p.last_seq], Self::row_to_event)?;
+        for r in rows {
+            let s = Self::decode(r?)?;
+            p.apply(s.seq, &s.event);
+        }
+        Ok(())
+    }
+
+    /// Projeksiyonu diskteki son duruma getirir (yazmadan okuyanlar için).
+    pub fn refresh(&mut self) -> Result<()> {
+        Self::catch_up(&self.conn, &mut self.projection)
+    }
+
     /// Olayı ekler; `id` boşsa atanır. Atanan seq döner.
     pub fn append(&mut self, ev: &Event) -> Result<i64> {
-        let tx = self.conn.transaction()?;
-        let seq = Self::insert(&tx, ev)?;
-        tx.commit()?;
-        self.projection.apply(seq, ev);
-        Ok(seq)
+        Ok(self.append_all(std::slice::from_ref(ev))?[0])
     }
 
     /// Hepsi ya da hiçbiri.
     pub fn append_all(&mut self, evs: &[Event]) -> Result<Vec<i64>> {
-        let tx = self.conn.transaction()?;
+        // IMMEDIATE: yazma kilidi hemen alınır; yakalama ile ekleme arasına başka süreç giremez.
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        Self::catch_up(&tx, &mut self.projection)?;
         let mut seqs = Vec::with_capacity(evs.len());
         for ev in evs {
             seqs.push(Self::insert(&tx, ev)?);
@@ -259,15 +289,69 @@ impl Journal {
         Ok(next)
     }
 
-    /// Mevcut projeksiyonun hash'iyle `state_checkpoint` yazar.
+    /// Diskteki tüm olayları kapsayan projeksiyonun hash'iyle `state_checkpoint` yazar.
     pub fn checkpoint(&mut self, ts: UnixNanos) -> Result<i64> {
-        let hash = self.projection.hash();
-        let through = self.projection.last_seq;
-        self.append(&Event::new(
-            ts,
-            EventKind::StateCheckpoint,
-            serde_json::json!({"hash": hash, "through_seq": through}),
-        ))
+        self.append_anchor(ts, EventKind::StateCheckpoint, serde_json::Map::new())
+    }
+
+    /// Hash'i yakalamadan sonra, ekleme ile aynı kilitli işlemde hesaplar (arada olay giremez).
+    fn append_anchor(
+        &mut self,
+        ts: UnixNanos,
+        kind: EventKind,
+        extra: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<i64> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        Self::catch_up(&tx, &mut self.projection)?;
+        let mut payload = extra;
+        payload.insert("hash".into(), self.projection.hash().into());
+        payload.insert("through_seq".into(), self.projection.last_seq.into());
+        let ev = Event::new(ts, kind, serde_json::Value::Object(payload));
+        let seq = Self::insert(&tx, &ev)?;
+        tx.commit()?;
+        self.projection.apply(seq, &ev);
+        Ok(seq)
+    }
+
+    /// `before_seq`'ten önceki olaylardan yalnız `include`'un kabul ettiklerini katlayıp hash'ler.
+    /// Eski bir checkpoint'in hangi görünümden yazıldığını sınamak için (bkz. [`Journal::rebase`]).
+    pub fn fold_hash(
+        &self,
+        before_seq: i64,
+        mut include: impl FnMut(&StoredEvent) -> bool,
+    ) -> Result<String> {
+        let mut p = Projection::default();
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, id, ts, kind, priority, key, payload FROM events WHERE seq < ?1 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map([before_seq], Self::row_to_event)?;
+        for r in rows {
+            let s = Self::decode(r?)?;
+            if include(&s) {
+                p.apply(s.seq, &s.event);
+            }
+        }
+        Ok(p.hash())
+    }
+
+    /// Yeni doğrulanmış çapa: mevcut tam projeksiyonun hash'i + kapattığı eski uyuşmazlıklar.
+    /// Geçmiş değişmez; replay çapanın hash'ini de doğrular, yani çapadan önceki her olay hâlâ
+    /// kurcalamaya karşı korunur. Hangi uyuşmazlıkların kapatılabileceğine çağıran karar verir
+    /// (CLI yalnız açıklanabilenleri kabul eder).
+    pub fn rebase(
+        &mut self,
+        ts: UnixNanos,
+        supersedes: &[i64],
+        explanation: serde_json::Value,
+        by: &str,
+    ) -> Result<i64> {
+        let mut extra = serde_json::Map::new();
+        extra.insert("supersedes".into(), serde_json::json!(supersedes));
+        extra.insert("explanation".into(), explanation);
+        extra.insert("by".into(), by.into());
+        self.append_anchor(ts, EventKind::CheckpointRebase, extra)
     }
 
     fn row_to_event(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawRow> {
@@ -382,19 +466,40 @@ impl Journal {
         let mut p = Projection::default();
         let mut events = 0u64;
         let mut checkpoints = 0u64;
-        let mut mismatches = Vec::new();
+        let mut mismatches: Vec<CheckpointMismatch> = Vec::new();
+        let mut superseded = Vec::new();
         self.for_each(|s| {
             events += 1;
-            if s.event.kind == EventKind::StateCheckpoint {
+            let anchor = matches!(
+                s.event.kind,
+                EventKind::StateCheckpoint | EventKind::CheckpointRebase
+            );
+            if anchor {
                 checkpoints += 1;
                 let recorded = str_field(&s.event.payload, "hash");
                 let recomputed = p.hash();
-                if recorded != recomputed {
+                let ok = recorded == recomputed;
+                if !ok {
                     mismatches.push(CheckpointMismatch {
                         seq: s.seq,
                         recorded,
                         recomputed,
                     });
+                }
+                // Yalnız kendisi doğrulanan çapa, kendinden önceki adı geçen uyuşmazlıkları kapatır.
+                if ok && s.event.kind == EventKind::CheckpointRebase {
+                    let listed: Vec<i64> = s
+                        .event
+                        .payload
+                        .get("supersedes")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|a| a.iter().filter_map(serde_json::Value::as_i64).collect())
+                        .unwrap_or_default();
+                    let (closed, open): (Vec<_>, Vec<_>) = std::mem::take(&mut mismatches)
+                        .into_iter()
+                        .partition(|m| m.seq < s.seq && listed.contains(&m.seq));
+                    superseded.extend(closed);
+                    mismatches = open;
                 }
             }
             p.apply(s.seq, &s.event);
@@ -404,6 +509,7 @@ impl Journal {
             events,
             checkpoints,
             mismatches,
+            superseded,
             final_hash: p.hash(),
         })
     }
@@ -504,6 +610,126 @@ mod tests {
             .unwrap();
         let r = j.replay().unwrap();
         assert!(!r.consistent());
+    }
+
+    /// VPS 2026-11-01 hatası: daemon açıkken CLI (Grok `trade open`) ayrı bağlantıdan `grok_order`
+    /// yazdı; daemon'un checkpoint'i bunu görmedi ve sonraki her checkpoint tutarsız çıktı.
+    #[test]
+    fn checkpoint_covers_events_written_by_other_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("j.sqlite");
+        let mut daemon = Journal::open(&path).unwrap();
+        sample(&mut daemon);
+        daemon.checkpoint(UnixNanos(5)).unwrap();
+        let mut cli = Journal::open(&path).unwrap();
+        cli.append(&ev(
+            6,
+            EventKind::GrokOrder,
+            serde_json::json!({"account":"grok","order":{"op":"open"}}),
+        ))
+        .unwrap();
+        cli.append(&ev(
+            7,
+            EventKind::OperatorNote,
+            serde_json::json!({"text":"x"}),
+        ))
+        .unwrap();
+        // Daemon kendi olayını ve checkpoint'ini yazar; ikisi de CLI'nin olaylarını kapsamalı.
+        daemon
+            .append(&ev(8, EventKind::Heartbeat, serde_json::json!({})))
+            .unwrap();
+        daemon.checkpoint(UnixNanos(9)).unwrap();
+        cli.append(&ev(10, EventKind::GrokOrder, serde_json::json!({})))
+            .unwrap();
+        daemon.checkpoint(UnixNanos(11)).unwrap();
+        let r = daemon.replay().unwrap();
+        assert!(r.consistent(), "{r:?}");
+        assert_eq!(r.checkpoints, 3);
+        assert_eq!(daemon.projection().counts.get("grok_order"), Some(&2));
+        assert_eq!(r.final_hash, daemon.projection().hash());
+        // Salt okuyan tutamak da yenilenince aynı duruma gelir.
+        cli.refresh().unwrap();
+        assert_eq!(cli.projection(), daemon.projection());
+    }
+
+    /// Eski (yakalama öncesi) uyuşmazlıklar geçmiş değişmeden, doğrulanan bir çapayla kapanır;
+    /// çapa öncesi olaylar kurcalanırsa yine yakalanır.
+    #[test]
+    fn rebase_supersedes_listed_mismatches_and_still_detects_tamper() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("j.sqlite");
+        let mut j = Journal::open(&path).unwrap();
+        sample(&mut j);
+        // Eski daemon'un yazdığı gibi bayat bir checkpoint (yanlış hash).
+        let stale = j
+            .append(&ev(
+                5,
+                EventKind::StateCheckpoint,
+                serde_json::json!({"hash":"bayat","through_seq":2}),
+            ))
+            .unwrap();
+        j.checkpoint(UnixNanos(6)).unwrap();
+        let r = j.replay().unwrap();
+        assert_eq!(r.mismatches.len(), 1);
+        assert_eq!(r.mismatches[0].seq, stale);
+
+        // Listede olmayan uyuşmazlık kapanmaz.
+        j.rebase(UnixNanos(7), &[999], serde_json::json!({}), "test")
+            .unwrap();
+        assert!(!j.replay().unwrap().consistent());
+        j.rebase(
+            UnixNanos(8),
+            &[stale],
+            serde_json::json!({"model":"test"}),
+            "test",
+        )
+        .unwrap();
+        let r = j.replay().unwrap();
+        assert!(r.consistent(), "{r:?}");
+        assert_eq!(r.superseded.len(), 1);
+        assert_eq!(r.superseded[0].seq, stale);
+
+        // Çapadan SONRA yeni bir bayat checkpoint: eski çapa onu kapatamaz.
+        j.append(&ev(
+            9,
+            EventKind::StateCheckpoint,
+            serde_json::json!({"hash":"yine bayat"}),
+        ))
+        .unwrap();
+        assert!(!j.replay().unwrap().consistent());
+
+        // Çapa öncesi bir olay kurcalanırsa çapanın kendi hash'i tutmaz.
+        let j = Journal::open(&path).unwrap();
+        j.raw()
+            .execute_batch("DROP TRIGGER events_no_update; UPDATE events SET payload='{\"strategy\":\"a\",\"instrument\":\"NQ\",\"gross\":1,\"fee\":0}' WHERE seq=3;")
+            .unwrap();
+        let r = j.replay().unwrap();
+        assert!(r.mismatches.iter().any(|m| m.seq > stale), "{r:?}");
+    }
+
+    #[test]
+    fn fold_hash_reproduces_a_filtered_view() {
+        let mut j = Journal::open_in_memory().unwrap();
+        sample(&mut j);
+        let full = j.fold_hash(i64::MAX, |_| true).unwrap();
+        assert_eq!(full, j.projection().hash());
+        let mut no_kill = Projection::default();
+        for s in j.read(&EventFilter::default()).unwrap() {
+            if s.event.kind != EventKind::KillSwitch {
+                no_kill.apply(s.seq, &s.event);
+            }
+        }
+        assert_eq!(
+            j.fold_hash(i64::MAX, |s| s.event.kind != EventKind::KillSwitch)
+                .unwrap(),
+            no_kill.hash()
+        );
+        // before_seq dışlayıcıdır.
+        let mut first_two = Projection::default();
+        for s in j.read(&EventFilter::default()).unwrap().iter().take(2) {
+            first_two.apply(s.seq, &s.event);
+        }
+        assert_eq!(j.fold_hash(3, |_| true).unwrap(), first_two.hash());
     }
 
     #[test]

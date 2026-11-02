@@ -194,6 +194,51 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "atlas_hypothesis_submit",
+        description: "Strateji hipotezi gönder (yalnız fikir + kurallar; parametreleri sistem seçer). Temel genom ve             ±%25 parametre komşuları arama kuyruğuna girer, normal aday gibi tarama + gauntlet'ten geçer; her aday             deneme sayılır (DSR). Günde en fazla 5 hipotez, aynısı ikinci kez girmez. Giriş kuralları genom koşul             DSL'i: {\"long\": {\"all\": [{\"gt\": [\"ema:50\", \"ema:200\"]}, {\"cross_above\": [\"close\", \"asia_high\"]}]}}.             Sonuç: atlas_hypotheses.",
+        read_only: false,
+        slow: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "idea": {"type": "string", "minLength": 10, "maxLength": 1000, "description": "Ne ve neden çalışmalı"},
+                    "source": {"type": "string", "minLength": 3, "maxLength": 300, "description": "Fikrin kaynağı (gözlem, kitap, makale, bağlantı)"},
+                    "timeframe": {"type": "string", "enum": ["1m", "5m", "15m", "30m", "1h", "4h"]},
+                    "entry": {
+                        "type": "object",
+                        "description": "Genom koşul DSL'i: long ve/veya short. Düğümler: all/any/not, gt/lt/cross_above/cross_below [a, b]; a/b feature ('ema:20', 'close', 'asia_high', 'london_high', 'pdh', 'vwap', 'rsi:14' …; gecikme 'ema:20@1') ya da sayı.",
+                        "properties": {"long": {"type": "object"}, "short": {"type": "object"}},
+                        "additionalProperties": false,
+                    },
+                    "exit": {
+                        "type": "object",
+                        "description": "İsteğe bağlı başlangıç değerleri (sistem ±%25 dener). Boşsa ATR(14)×1,5 stop, 2R hedef.",
+                        "properties": {
+                            "atr": {"type": "integer", "minimum": 2, "maximum": 500},
+                            "stop_atr": {"type": "number", "minimum": 0.05, "maximum": 50},
+                            "target_r": {"type": "number", "minimum": 0.1, "maximum": 50},
+                            "time_bars": {"type": "integer", "minimum": 1},
+                        },
+                        "required": ["atr", "stop_atr"],
+                        "additionalProperties": false,
+                    },
+                    "session_utc": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 24}, "minItems": 2, "maxItems": 2, "description": "UTC saat penceresi [başlangıç, bitiş), ör. Londra açılışı [7,10], NY açılışı [13,16]"},
+                    "falsification": {"type": "string", "minLength": 3, "maxLength": 500, "description": "Hipotezi ne çürütür"},
+                },
+                "required": ["idea", "source", "timeframe", "entry"],
+                "additionalProperties": false,
+            })
+        },
+    },
+    Tool {
+        name: "atlas_hypotheses",
+        description: "Gönderilen hipotezler: kaç aday, kaçı bekliyor, kaçı denendi, en iyi sonuç (düştüğü kapı).",
+        read_only: true,
+        slow: false,
+        schema: empty,
+    },
+    Tool {
         name: "atlas_experiments_summary",
         description: "Deney sicili özeti: toplam deneme sayısı, kapı dağılımı, kaynak performansı.",
         read_only: true,
@@ -452,6 +497,22 @@ pub fn resolve(name: &str, args: &Value) -> Result<Vec<String>, String> {
         }
         "atlas_note" => vec![s("note"), j, s("--"), s(text(a, "text", 2000)?)],
         "atlas_experiments_summary" => vec![s("experiments"), s("summary"), j],
+        "atlas_hypothesis_submit" => {
+            // Yapı CLI'da şemayla doğrulanır; burada yalnız zorunlu alanlar ve boyut.
+            for k in ["idea", "source", "timeframe"] {
+                text(a, k, 1000)?;
+            }
+            one_of(a, "timeframe", &["1m", "5m", "15m", "30m", "1h", "4h"])?;
+            if !a.get("entry").is_some_and(Value::is_object) {
+                return Err(bad("'entry' nesne olmalı (long/short)"));
+            }
+            let body = serde_json::to_string(a).map_err(|e| bad(e.to_string()))?;
+            if body.len() > 20_000 {
+                return Err(bad("hipotez en fazla 20 KB"));
+            }
+            vec![s("hypothesis"), s("submit"), j, s("--"), body]
+        }
+        "atlas_hypotheses" => vec![s("hypothesis"), s("list"), j],
         "atlas_budget" => vec![s("budget"), j],
         "atlas_approvals_list" => vec![s("approvals"), s("list"), j],
         "atlas_approvals_show" => {
@@ -549,11 +610,41 @@ mod tests {
             if t.name == "atlas_approvals_show" {
                 a.insert("id".into(), json!(3));
             }
+            if t.name == "atlas_hypothesis_submit" {
+                a.insert("idea".into(), json!("Londra açılışı kırılımı devam eder"));
+                a.insert("source".into(), json!("gözlem"));
+                a.insert("timeframe".into(), json!("15m"));
+                a.insert(
+                    "entry".into(),
+                    json!({"long": {"cross_above": ["close", "asia_high"]}}),
+                );
+            }
             let v =
                 resolve(t.name, &Value::Object(a)).unwrap_or_else(|e| panic!("{}: {e}", t.name));
             assert!(!v[0].starts_with('-'), "{}: {v:?}", t.name);
             assert!(v.contains(&"--json".to_string()), "{}", t.name);
         }
+    }
+
+    #[test]
+    fn hipotez_tek_json_argumani_olarak_ayractan_sonra() {
+        let v = r(
+            "atlas_hypothesis_submit",
+            json!({"idea": "--home=/tmp kırılım", "source": "gözlem", "timeframe": "1h",
+                   "entry": {"long": {"gt": ["ema:50", "ema:200"]}}}),
+        )
+        .unwrap();
+        assert_eq!(&v[..4], ["hypothesis", "submit", "--json", "--"]);
+        assert_eq!(v.len(), 5);
+        assert!(v[4].starts_with('{'));
+        let back: Value = serde_json::from_str(&v[4]).unwrap();
+        assert_eq!(back["timeframe"], "1h");
+        assert!(r("atlas_hypothesis_submit", json!({"idea": "uzun bir fikir metni", "source": "x y", "timeframe": "2h", "entry": {}})).is_err());
+        assert!(r("atlas_hypothesis_submit", json!({"idea": "uzun bir fikir metni", "source": "x y", "timeframe": "1h", "entry": "ema"})).is_err());
+        assert_eq!(
+            r("atlas_hypotheses", json!({})).unwrap(),
+            ["hypothesis", "list", "--json"]
+        );
     }
 
     #[test]

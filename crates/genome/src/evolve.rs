@@ -110,6 +110,34 @@ fn rand_cond(r: &mut ChaCha8Rng) -> Cond {
     }
 }
 
+/// Rastgele zaman dilimi ağırlıkları (dakika, ağırlık): 15m/1h/4h öncelikli — 1m'de ücret kenarı yiyor.
+const TF_WEIGHTS: &[(u32, u32)] = &[(1, 1), (5, 1), (15, 3), (30, 1), (60, 3), (240, 2)];
+
+fn rand_timeframe(r: &mut ChaCha8Rng) -> u32 {
+    let total: u32 = TF_WEIGHTS.iter().map(|(_, w)| w).sum();
+    let mut x = r.random_range(0..total);
+    for (tf, w) in TF_WEIGHTS {
+        if x < *w {
+            return *tf;
+        }
+        x -= w;
+    }
+    1
+}
+
+/// Seans açılışı pencereleri (UTC saat, [a, b)): Londra açılışı 07:00, New York açılışı 13:30/14:30
+/// (yaz/kış; 17:30 TSİ kışın) — iki DST hâlini de kapsar.
+const SESSION_WINDOWS: &[(u32, u32)] = &[(7, 10), (13, 16)];
+
+fn rand_hours(r: &mut ChaCha8Rng) -> (u32, u32) {
+    if r.random_bool(0.6) {
+        SESSION_WINDOWS[r.random_range(0..SESSION_WINDOWS.len())]
+    } else {
+        let a = r.random_range(0..24);
+        (a, (a + r.random_range(2..12)) % 24)
+    }
+}
+
 /// Rastgele (geleceğe bakmayan) genom. Sahte strateji testi ve evrim başlangıç popülasyonu.
 pub fn random_genome(r: &mut ChaCha8Rng, instrument: &str, name: &str, risk_usd: u32) -> Genome {
     let dir = r.random_range(0..3);
@@ -117,16 +145,17 @@ pub fn random_genome(r: &mut ChaCha8Rng, instrument: &str, name: &str, risk_usd:
         long: (dir != 1).then(|| rand_cond(r)),
         short: (dir != 0).then(|| rand_cond(r)),
     };
+    let tf = rand_timeframe(r);
+    // Zaman çıkışı bar sayısı: dilim büyüdükçe aynı takvim süresi daha az bar.
+    let max_bars = (1500 / tf).max(20);
     Genome {
         name: name.to_string(),
         instrument: instrument.to_string(),
         tags: vec!["random".into()],
+        timeframe_min: (tf != 1).then_some(tf),
         entry,
         filters: Filters {
-            hours_utc: r.random_bool(0.3).then(|| {
-                let a = r.random_range(0..24);
-                (a, (a + r.random_range(2..12)) % 24)
-            }),
+            hours_utc: r.random_bool(0.3).then(|| rand_hours(r)),
             ..Filters::default()
         },
         exit: Exit {
@@ -135,7 +164,7 @@ pub fn random_genome(r: &mut ChaCha8Rng, instrument: &str, name: &str, risk_usd:
             target_r: r
                 .random_bool(0.8)
                 .then(|| ((0.5 + r.random::<f64>() * 3.5) * 100.0).round() / 100.0),
-            time_bars: r.random_bool(0.7).then(|| r.random_range(5..1500)),
+            time_bars: r.random_bool(0.7).then(|| r.random_range(3..max_bars)),
         },
         sizing: Sizing { risk_usd },
     }
@@ -342,6 +371,11 @@ fn mutate_once(g: &Genome, r: &mut ChaCha8Rng) -> Genome {
         return set_param(g, i, v);
     }
     let mut c = g.clone();
+    if r.random_bool(0.15) {
+        let tf = rand_timeframe(r);
+        c.timeframe_min = (tf != 1).then_some(tf);
+        return c;
+    }
     let side = if c.entry.long.is_some() && (c.entry.short.is_none() || r.random_bool(0.5)) {
         &mut c.entry.long
     } else {
@@ -373,7 +407,11 @@ pub fn crossover(a: &Genome, b: &Genome, r: &mut ChaCha8Rng) -> Genome {
     match r.random_range(0..3) {
         0 if b.entry.long.is_some() => c.entry.long = b.entry.long.clone(),
         1 if b.entry.short.is_some() => c.entry.short = b.entry.short.clone(),
-        _ => c.exit = b.exit.clone(),
+        _ => {
+            // Çıkış parametreleri (ATR periyodu, zaman barları) dilime görelidir: birlikte taşınır.
+            c.exit = b.exit.clone();
+            c.timeframe_min = b.timeframe_min;
+        }
     }
     c
 }
@@ -412,6 +450,19 @@ mod tests {
             a.validate().unwrap();
             Genome::from_toml_str(&a.to_toml()).unwrap();
         }
+    }
+
+    #[test]
+    fn random_timeframes_favor_higher_frames() {
+        let mut r = rng(11);
+        let mut n = std::collections::BTreeMap::<u32, u32>::new();
+        for i in 0..2000 {
+            *n.entry(random_genome(&mut r, "BTCUSDT", &format!("g{i}"), 1000).timeframe())
+                .or_default() += 1;
+        }
+        let hi = n.get(&15).unwrap() + n.get(&60).unwrap() + n.get(&240).unwrap();
+        assert!(hi > 1300, "{n:?}");
+        assert!(n.get(&1).copied().unwrap_or(0) > 0, "{n:?}");
     }
 
     #[test]
