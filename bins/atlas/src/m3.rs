@@ -532,8 +532,12 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
         "strategy pause yok-boyle-strateji test",
         "trade list",
         "market",
+        "alert list",
+        // Var olmayan alarmın iptali: sarmalayıcıdan geçer, CLI reddeder (journal'a yazmaz).
+        "alert cancel 999999999 test",
     ];
     let forbidden = [
+        "alert purge",
         "approve 1",
         "kill-reset global",
         "gauntlet run trend_pullback",
@@ -573,6 +577,7 @@ pub fn verify_m3(h: &Home, out: &Out, replay_days: u64) -> Result<bool> {
         vec!["--home=/tmp", "status"],
         vec!["experiments", "run"],
         vec!["journal", "checkpoint"],
+        vec!["alert", "purge"],
         vec![],
     ] {
         let code = bash_cmd()

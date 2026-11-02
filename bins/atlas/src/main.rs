@@ -1,6 +1,7 @@
 //! `atlas` — tek CLI (§6). Grok Bot'un sisteme tek arayüzü; her komut `--json` destekler.
 //! Çıktı şeması: docs/cli-schema.md (`atlas.cli/1`).
 
+mod alerts;
 mod daemon;
 mod grok;
 mod home;
@@ -137,6 +138,11 @@ enum Cmd {
         /// Gösterilecek son 1m bar sayısı (1..240).
         #[arg(long, default_value_t = 30)]
         bars: usize,
+    },
+    /// Grok fiyat/seans alarmı (ADR 0011): kur / listele / iptal. Tetiklenince webhook uyandırır.
+    Alert {
+        #[command(subcommand)]
+        cmd: alerts::AlertCmd,
     },
 }
 
@@ -486,6 +492,7 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
             TradeCmd::List => grok::trade_list(&h, out),
         },
         Cmd::Market { bars } => grok::market(&h, out, bars),
+        Cmd::Alert { cmd } => alerts::run(&h, out, cmd),
         Cmd::WebhookTest => {
             let v = daemon::webhook_test(&h)?;
             out.emit("webhook-test", true, v, || {

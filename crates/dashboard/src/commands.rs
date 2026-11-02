@@ -62,6 +62,14 @@ pub const READ_COMMANDS: &[ReadCommand] = &[
         title: "Piyasa özeti",
     },
     ReadCommand {
+        route: "alert/list",
+        argv: &["alert", "list"],
+        param: Param::None,
+        query: QuerySpec::None,
+        milestone: "Grok",
+        title: "Grok alarmları",
+    },
+    ReadCommand {
         route: "status",
         argv: &["status"],
         param: Param::None,
@@ -179,6 +187,8 @@ pub const EXCLUDED: &[(&str, &str)] = &[
         "trade cancel",
         "yazma: Grok hesabında bekleyen girişi iptal eder",
     ),
+    ("alert add", "yazma: Grok alarmı kurar (journal)"),
+    ("alert cancel", "yazma: Grok alarmını iptal eder (journal)"),
     ("note", "yazma: journal'a operatör notu"),
     (
         "strategy",

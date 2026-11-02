@@ -1,5 +1,22 @@
 # Değişiklik günlüğü
 
+## Grok alarmları + maker ücreti (2026-11-02, ADR 0011)
+
+### Eklendi
+- **Maker/taker ücreti**: `instruments.toml` `maker_fee_rate_percent` (isteğe bağlı; boşsa tek oran). BTCUSDT/ETHUSDT
+  maker %0,02 (Binance VIP 0, resmi kaynak). Sim: verildiği anda marketable olmayan, kitapta bekleyip dolan limit
+  girişi maker; piyasa, stop, marketable limit ve tüm çıkışlar taker. Genom sonuçları değişmez (test). Grok emir
+  detayında `fee_usd`.
+- **Grok alarmları**: `atlas alert add|list|cancel` — fiyat (`--above/--below`, ≤7 gün) ya da seans açılışı
+  (`--session london|ny`, DST dahil); tek seferlik, en fazla 20 etkin. Olaylar `grok_alert_set`,
+  `grok_alert_cancelled` (INFO), `price_alert` (HIGH → sessiz saatte de webhook). Daemon her barda denetler; durum
+  journal'dan kurulur, tetiklenmiş alarm yeniden başlatmada tekrar etmez.
+- **MCP**: `atlas_alert_set`, `atlas_alerts`, `atlas_alert_cancel`; `atlas-admin` / `atlas-grok` beyaz listesi,
+  `verify m3` izin testleri ve dashboard (`alert list`) güncellendi.
+
+### Not
+- Yeni olay türleri yazıldıktan sonra eski binary journal'ı açamaz: deploy sırası önce binary (HANDOFF §5).
+
 ## M4 — Derinlik (2026-10-31)
 
 ### Eklendi

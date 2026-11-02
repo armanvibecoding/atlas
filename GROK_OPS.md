@@ -7,6 +7,9 @@
 > Güncelleme: 2026-11-01. Bu belge, kurulu sistemin gerçek davranışına göre yazıldı ve Claude Code tarafından sunucuda
 > doğrulandı. Herkese açık repodaki kopyada adres ve token yer tutucudur (`<MCP_ADRESİ>`, `<MCP_TOKEN>`); gerçek
 > değerler yalnız Arman'ın sana verdiği kopyada bulunur.
+>
+> 2026-11-02 eki: fiyat/seans alarmları (§4.5, `atlas_alert_*`) ve limit girişlerde maker ücreti (§4.4). Bu ikisi
+> yeni sürüm sunucuya kurulunca geçerlidir; `atlas_alerts` aracı listede yoksa henüz kurulmamıştır.
 
 ---
 
@@ -79,6 +82,9 @@ Her araç `atlas.cli/1` JSON zarfı döndürür: `{"schema":"atlas.cli/1","comma
 | `trade list` | `atlas_trades` | Kendi hesabın: bakiye, equity, bugünkü PnL, pozisyon, emir durumları (red sebebiyle), işlemler, limitler | ✓ |
 | `trade open` | `atlas_trade_open` | Kendi hesabında pozisyon aç: `side`, `size` (BTC), `stop` zorunlu; `target`, `limit`, `expiry_min` isteğe bağlı | ✓ |
 | `trade close` / `cancel` | `atlas_trade_close`, `atlas_trade_cancel` | Pozisyonu piyasadan kapat / bekleyen limit girişini iptal et | ✓ |
+| `alert add` | `atlas_alert_set` | Fiyat (`price_above` / `price_below`) ya da seans açılışı (`session_open`: `london` / `ny`) alarmı kur; tetiklenince webhook seni uyandırır (§4.5) | ✓ |
+| `alert list` | `atlas_alerts` | Etkin alarmlar + son sonuçlananlar (triggered / cancelled / expired) | ✓ |
+| `alert cancel <id>` | `atlas_alert_cancel` | Etkin alarmı iptal et | ✓ |
 | `verify m1|m2|m3|m4` | `atlas_verify` | **Ağır** (m2 sunucuda birkaç dakika, CPU yer). Yalnız devir günü ya da Arman isteyince; aynı anda tek | ✓ |
 | `approve <id>` | — | Onay — yalnız Arman, kendi anahtarıyla | ✗ |
 | `kill-reset`, `risk set …`, `deploy` | — | Kill switch açma, limit, deploy — yalnız Arman | ✗ |
@@ -102,7 +108,8 @@ yapmanın yolu yoktur.
 - Bu sürede sistem için **yalnız okuma araçlarını** kullanırsın (status, health, events, report, strategies,
   experiments, budget, approvals). `pause`, `demote`, `resume`, `kill`, `note` **kullanmazsın** — müdahale denemeyi
   geçersiz kılar. Sistem kendi korumalarını (risk kapısı, otomatik düşürme, kill switch) kendisi uygular.
-- **Kendi hesabında işlem yapmak deneme sırasında da serbest** (§4.4); sistemin stratejilerini etkilemez.
+- **Kendi hesabında işlem yapmak ve alarm kurmak deneme sırasında da serbest** (§4.4, §4.5); sistemin
+  stratejilerini etkilemez.
 - Atlas'tan alarm gelirse §5'e bakıp Arman'a bildirirsin; yalnız "sistem ne yaptı" ve "Arman'dan ne gerekiyor".
 - `verify` çalıştırmazsın (CPU yer, denemeyi etkiler).
 
@@ -137,6 +144,9 @@ yapmanın yolu yoktur.
 Adımlar: `atlas_health` → `atlas_events` (`since: "seq:<son gördüğün>"`) → §5 karar tablosu → Arman'a mesaj:
 **[ÖNCELİK] Ne oldu → Sistem ne yaptı → Sen ne yaptın → Arman'dan ne gerekiyor (varsa).** Gerekirse
 `atlas_note` ile değerlendirmeni journal'a yaz (deneme döneminde yazma).
+
+`kind: wake` ve `body.kind: "price_alert"` ise bu **senin kurduğun alarmdır** (§4.5), sistem sorunu değildir:
+§4.5'teki adımları izle, Arman'a mesaj gerekmez.
 
 Sessiz saatler (23:30–09:00 TSİ): **HIGH olaylar yine anında gelir**; MEDIUM ve INFO 09:00 özetinde toplu gelir.
 Aynı olay anahtarı 30 dk içinde tekrar uyandırmaz. Hiçbir olay kaybolmaz: teslim edilemeyen mesaj sunucuda bekler,
@@ -182,6 +192,11 @@ Aynı anda **tek pozisyon** (ve tek bekleyen limit giriş).
    `size` 0,001'in katı olmalı.
 4. **Aç:** `atlas_trade_open` (`side`, `size`, `stop`, `target`, `reason`). Piyasa emri **sonraki 1m barın açılışında**
    dolar (≤1–2 dk). `limit` verirsen o fiyattan ya da daha iyi dolar; `expiry_min` sonra iptal olur (varsayılan 60).
+   **Ücret (Binance VIP 0):** emri verdiğin anda son fiyata değmeyen ve kitapta bekleyip dolan limit girişi
+   **maker %0,02** öder (alışta limit < son fiyat, satışta limit > son fiyat). Piyasa emri, son fiyata değen
+   (marketable) limit, stop ve tüm çıkışlar (stop, hedef, `trade close`) **taker %0,05** öder. Örnek: 2 BTC @ 78.050
+   bekleyen limit giriş → $31,22 (taker olsaydı $78,05). Ödenen ücret `atlas_trades` → `orders[].detail.fee_usd`.
+   Risk tavanı (3. adım) yine karamsar %0,05 + %0,05 ile hesaplanır.
 5. **Doğrula:** 1–2 dk sonra `atlas_trades`: emir `filled` mi, `rejected` mı? Red sebebi `detail`'de
    (ör. `risk_per_trade`, `daily_loss_room`, `already_exposed`, `bad_stop`). Reddedileni boyut/stop düzelterek
    yeniden deneyebilirsin; limitleri aşmanın yolu yoktur.
@@ -195,6 +210,29 @@ Kurallar:
 - `position_opened` / `position_closed` olayları (MEDIUM, `account: "grok"`) senin işlemlerindir; sistemin
   stratejileriyle karıştırma.
 - Günlük rapora kendi hesabını ayrı satırda yaz (§4.2).
+
+### 4.5 Alarm kur (iki kontrol arasında fırsatı kaçırmamak için)
+
+Alarm emir vermez; yalnız seni uyandırır. Sembol BTCUSDT (daemon'un canlı akışı).
+
+- **Fiyat:** `atlas_alert_set` `{condition: "price_above", price: "70250.5"}` — 1m bar yükseği seviyeye değince;
+  `price_below` — bar düşüğü seviyeye değince. Seviye son fiyatın doğru tarafında olmalı (üstü için yukarıda, altı için
+  aşağıda; yoksa ret). Geçerlilik `expiry_hours` 1..168 (varsayılan 24); süre dolunca düşer.
+- **Seans açılışı:** `{condition: "session_open", session: "london" | "ny"}` — bir sonraki **hafta içi** açılış:
+  london = 07:00 UTC (sabit), ny = 09:30 New York saati (yaz/kış saati otomatik; kışın 14:30 UTC, yazın 13:30 UTC).
+  Açılış dakikasının barı kapanınca tetiklenir; veri gelmezse açılıştan 60 dk sonra düşer. Tatil takvimi yok
+  (ABD/İngiltere tatilinde de tetiklenir).
+- İsteğe bağlı `note` (≤200 karakter): neden kurduğunu yaz; tetiklenince olayda geri gelir.
+- **Tek seferlik:** tetiklenen alarm düşer, aynı seviye için yenisini kurarsın. Aynı anda en fazla **20** etkin alarm.
+  Gereksizleşen alarmı `atlas_alert_cancel` (`id` = kurarken dönen `alert_id`) ile iptal et; durum için `atlas_alerts`.
+- **Tetiklenince:** webhook `wake`, `body.kind = "price_alert"` (HIGH — sessiz saatte de gelir), `body.payload`:
+  `alert_id, condition, level / session_open, bar_time, bar {open, high, low, close}, note, message`.
+  Adımlar: `atlas_health` → `atlas_market` (`age_s` ≤ 180 mi?) → `atlas_trades` → karar (§4.4). İşlem açmazsan da
+  sorun yok. Arman'a mesaj gerekmez; işlem açtıysan günlük rapordaki hesap satırında görünür.
+- Saatlik uyandırma limiti (6) sistem alarmlarıyla ortaktır; çok sayıda alarm aynı anda tetiklenirse fazlası
+  `wake_batch` içinde gelir (kaybolmaz). Bu yüzden alarmları seyrek ve anlamlı seviyelere kur.
+- Daemon yeniden başlarsa tetiklenmiş alarm tekrar tetiklenmez; kesinti sırasında koşulu sağlanan alarm, veri boşluğu
+  doldurulunca geç tetiklenebilir — `bar_time`'a bak, eskiyse fiyatı `atlas_market` ile yeniden kontrol et.
 
 ---
 
@@ -215,10 +253,12 @@ Kurallar:
 | `budget_exhausted` | HIGH | Ajanlar durdu, mekanik devam | Bilgi ver; bütçe Arman'ın kararı |
 | `approval_request` | HIGH | Paket hazır (`atlas_approvals_show`) | Tek mesajda özetle: ne, neden, kanıt (`atlas_strategy_show`), risk, geri dönüş yolu. Görüşün yalnız **gözlem** |
 | `outbox_dead` | HIGH | Mesaj ~1 gün teslim edilemedi | `atlas_events` ile kaçanları oku, özetle |
+| `price_alert` | HIGH | Senin kurduğun alarm tetiklendi ve düştü (sistem sorunu değil) | §4.5 adımları; Arman'a mesaj gerekmez |
 | `promotion` / `gauntlet_pass` | MEDIUM | Merdiven değişti (gauntlet → otomatik gölge → otomatik paper) | Günlük rapora ekle |
 | `position_opened` / `position_closed` | MEDIUM | Paper hesapta işlem | Günlük rapora say |
 | `drift_alarm`, `fill_divergence` | — | Şu an üretilmiyor (sapma `demotion` olarak gelir; gerçek dolum M5'te) | — |
 | `shadow_signal`, `search_cycle`, `heartbeat`, `experiment_done`, `stage_change` | INFO | — | Uyandırmaz; özette görürsün |
+| `grok_alert_set`, `grok_alert_cancelled` | INFO | Senin alarm kurma/iptal kayıtların | Uyandırmaz |
 
 Terfi merdiveni: `aday → gauntlet → gölge (canlı veri, emir yok) → paper → mikro eval → ölçek`.
 Paper'dan yukarısı **yalnız Arman onayıyla**.

@@ -92,6 +92,9 @@ event_kinds! {
     ApprovalRequest => "approval_request", High;
     BudgetExhausted => "budget_exhausted", High;
     OutboxDead => "outbox_dead", High;
+    // Grok'un kendi kurduğu fiyat/seans alarmı (ADR 0011): sessiz saatte de uyandırmalı; tek seferlik,
+    // en fazla 20 etkin alarmla sınırlı olduğu için uyandırma limitini taşıramaz.
+    PriceAlert => "price_alert", High;
     // MEDIUM
     PositionOpened => "position_opened", Medium;
     PositionClosed => "position_closed", Medium;
@@ -116,6 +119,8 @@ event_kinds! {
     ShadowSignal => "shadow_signal", Info;
     GrokOrder => "grok_order", Info;
     GrokOrderApplied => "grok_order_applied", Info;
+    GrokAlertSet => "grok_alert_set", Info;
+    GrokAlertCancelled => "grok_alert_cancelled", Info;
     AgentCall => "agent_call", Info;
     AgentInvalidOutput => "agent_invalid_output", Info;
     SearchCycle => "search_cycle", Info;
@@ -169,6 +174,10 @@ mod tests {
         assert_eq!(EventKind::OutboxDead.priority(), Priority::High);
         assert_eq!(EventKind::DataQuality.priority(), Priority::Medium);
         assert_eq!(EventKind::Heartbeat.priority(), Priority::Info);
+        // Grok alarmı: kuruluş/iptal kaydı uyandırmaz, tetiklenme uyandırır (sessiz saatte de).
+        assert_eq!(EventKind::PriceAlert.priority(), Priority::High);
+        assert_eq!(EventKind::GrokAlertSet.priority(), Priority::Info);
+        assert_eq!(EventKind::GrokAlertCancelled.priority(), Priority::Info);
     }
 
     #[test]
