@@ -516,9 +516,36 @@ impl Registry {
         Ok(q)
     }
 
-    /// Bir kaynağın kuyruğa koyduğu öğeler (en yeni önce) ve alınıp alınmadıkları.
-    pub fn queued_by_source(&self, source: &str) -> Result<Vec<QueueRow>> {
-        let mut st = self.conn.prepare(
+    /// Kaynağın mevcut kuyruğunu `guard`'a gösterip onaylarsa öğeleri ekler — hepsi tek IMMEDIATE
+    /// işlemde (eşzamanlı iki gönderim günlük sınırı/tekrar denetimini atlayamaz). Öğe: (genom JSON, not).
+    pub fn queue_genomes_guarded(
+        &mut self,
+        source: &str,
+        items: &[(String, String)],
+        ts: u64,
+        guard: impl FnOnce(&[QueueRow]) -> std::result::Result<(), String>,
+    ) -> Result<std::result::Result<Vec<i64>, String>> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let rows = Self::queue_rows(&tx, source)?;
+        if let Err(e) = guard(&rows) {
+            return Ok(Err(e));
+        }
+        let mut ids = Vec::with_capacity(items.len());
+        for (g, note) in items {
+            tx.execute(
+                "INSERT INTO search_queue (genome_json, source, note, created_ts) VALUES (?1,?2,?3,?4)",
+                params![g, source, note, to_i64(ts)],
+            )?;
+            ids.push(tx.last_insert_rowid());
+        }
+        tx.commit()?;
+        Ok(Ok(ids))
+    }
+
+    fn queue_rows(conn: &rusqlite::Connection, source: &str) -> Result<Vec<QueueRow>> {
+        let mut st = conn.prepare(
             "SELECT q.id, q.note, q.created_ts, q.id IN (SELECT queue_id FROM search_queue_taken)
              FROM search_queue q WHERE q.source = ?1 ORDER BY q.id DESC",
         )?;
@@ -533,6 +560,11 @@ impl Registry {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(v)
+    }
+
+    /// Bir kaynağın kuyruğa koyduğu öğeler (en yeni önce) ve alınıp alınmadıkları.
+    pub fn queued_by_source(&self, source: &str) -> Result<Vec<QueueRow>> {
+        Self::queue_rows(&self.conn, source)
     }
 
     /// Kaynak başına (deneme, taramayı geçip gauntlet'te kapı ≥ 2'ye ulaşan) — meta-öğrenme.

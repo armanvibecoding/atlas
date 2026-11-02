@@ -105,17 +105,43 @@ pub struct SharedColumns {
 /// Önbellek anahtarı: (veri versiyonu, feature, feature sürümü).
 type CacheKey = (String, FeatureSpec, u32);
 
+/// Önbellekteki sütunların toplam eleman (f64) sınırı ≈ 1 GiB. Aşılınca önbellek boşaltılır (sütunlar
+/// gerektiğinde yeniden hesaplanır). Sınırsız önbellek uzun koşan daemon'u servis bellek tavanına itiyordu.
+pub const DEFAULT_CACHE_MAX_VALUES: usize = 128 * 1024 * 1024;
+
 /// (veri versiyonu, feature) → sütun önbelleği. Aynı veri üzerinde binlerce genom aynı sütunları paylaşır.
-#[derive(Default)]
 pub struct FeatureStore {
     cache: Mutex<BTreeMap<CacheKey, Arc<Vec<f64>>>>,
     times: Mutex<BTreeMap<String, Arc<Vec<UnixNanos>>>>,
     computed: Mutex<u64>,
+    /// (önbellekteki toplam eleman, sınır)
+    size: Mutex<(usize, usize)>,
+}
+
+impl Default for FeatureStore {
+    fn default() -> Self {
+        Self::with_cap(DEFAULT_CACHE_MAX_VALUES)
+    }
 }
 
 impl FeatureStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Önbellek sınırı `max_values` f64 eleman.
+    pub fn with_cap(max_values: usize) -> Self {
+        FeatureStore {
+            cache: Mutex::new(BTreeMap::new()),
+            times: Mutex::new(BTreeMap::new()),
+            computed: Mutex::new(0),
+            size: Mutex::new((0, max_values.max(1))),
+        }
+    }
+
+    /// Önbellekteki toplam eleman sayısı.
+    pub fn cached_values(&self) -> usize {
+        self.size.lock().map(|g| g.0).unwrap_or(0)
     }
 
     /// Kaç feature sütunu gerçekten hesaplandı (önbellek isabetleri hariç).
@@ -148,11 +174,28 @@ impl FeatureStore {
         missing.dedup();
         if !missing.is_empty() {
             let f = FeatureFrame::compute(&missing, session.clone(), bars);
-            if let Ok(mut c) = self.cache.lock() {
+            if let (Ok(mut c), Ok(mut size)) = (self.cache.lock(), self.size.lock()) {
+                let add: usize = f.cols.iter().map(Vec::len).sum();
+                if size.0 + add > size.1 {
+                    // Dışarıda tutulan Arc'lar (çalışan değerlendirmeler) geçerli kalır; yalnız önbellek boşalır.
+                    c.clear();
+                    size.0 = 0;
+                    if let Ok(mut t) = self.times.lock() {
+                        t.clear();
+                    }
+                }
                 for (s, col) in f.specs.iter().zip(f.cols) {
                     let a = Arc::new(col);
-                    c.insert((data_version.to_string(), *s, FEATURE_VERSION), a.clone());
+                    if c.insert((data_version.to_string(), *s, FEATURE_VERSION), a.clone())
+                        .is_none()
+                    {
+                        size.0 += a.len();
+                    }
                     out.insert(*s, a);
+                }
+            } else {
+                for (s, col) in f.specs.iter().zip(f.cols) {
+                    out.insert(*s, Arc::new(col));
                 }
             }
             if let Ok(mut n) = self.computed.lock() {
@@ -179,6 +222,29 @@ impl FeatureStore {
 mod tests {
     use super::*;
     use atlas_core::Price;
+
+    #[test]
+    fn cache_is_bounded_and_results_unchanged() {
+        let b = bars(1000);
+        let specs: Vec<FeatureSpec> = ["ema:10", "ema:20", "sma:30"]
+            .iter()
+            .map(|x| x.parse().unwrap())
+            .collect();
+        let big = FeatureStore::new();
+        let small = FeatureStore::with_cap(2500);
+        for s in &specs {
+            let a = big.columns("v", &SessionSpec::Always, &b, &[*s]);
+            let c = small.columns("v", &SessionSpec::Always, &b, &[*s]);
+            let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+            assert_eq!(bits(&a.cols[s]), bits(&c.cols[s]));
+            assert!(small.cached_values() <= 2500);
+        }
+        assert_eq!(big.cached_values(), 3000);
+        // Sınır aşıldığı için küçük önbellek baştaki sütunu yeniden hesaplar.
+        let before = small.computed_count();
+        small.columns("v", &SessionSpec::Always, &b, &specs[..1]);
+        assert_eq!(small.computed_count(), before + 1);
+    }
 
     pub(crate) fn bars(n: usize) -> Vec<Bar> {
         // Deterministik, dalgalı seri: hem trend hem salınım.

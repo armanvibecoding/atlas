@@ -143,37 +143,48 @@ pub fn submit(
 ) -> Result<Value> {
     let base = h.genome(instrument, risk_usd)?;
     let id = format!("hip-{}", &base.hash()[..8]);
-    let rows = reg.queued_by_source(SOURCE)?;
-    let mut today = std::collections::BTreeSet::new();
-    for r in &rows {
-        if let Some((hid, _)) = note_hyp(&r.note) {
-            if hid == id {
-                bail!("{id} zaten kuyrukta/denendi (aynı hipotez ikinci kez deneme sayılmaz)");
-            }
-            if r.created_ts + NANOS_PER_DAY > now.0 {
-                today.insert(hid);
-            }
-        }
-    }
-    if today.len() >= DAILY_LIMIT {
-        bail!("günlük hipotez sınırı ({DAILY_LIMIT}) doldu; deneme sayacı şişmesin diye");
-    }
     if !reg.experiments_for_hash(&base.hash(), 1)?.is_empty() {
         bail!("bu genom arama tarafından zaten denenmiş ({id})");
     }
     let vs = variants(&base, &id);
+    let mut items = Vec::with_capacity(vs.len());
     for (i, (label, g)) in vs.iter().enumerate() {
         let mut note = json!({"hyp": id, "v": i, "param": label});
         if i == 0 {
             note["hypothesis"] = serde_json::to_value(h)?;
         }
-        reg.queue_genome(&serde_json::to_string(g)?, SOURCE, &note.to_string(), now.0)?;
+        items.push((serde_json::to_string(g)?, note.to_string()));
     }
+    // Tekrar ve günlük sınır denetimi ekleme ile aynı kilitli işlemde.
+    let mut used_today = 0usize;
+    reg.queue_genomes_guarded(SOURCE, &items, now.0, |rows| {
+        let mut today = std::collections::BTreeSet::new();
+        for r in rows {
+            if let Some((hid, _)) = note_hyp(&r.note) {
+                if hid == id {
+                    return Err(format!(
+                        "{id} zaten kuyrukta/denendi (aynı hipotez ikinci kez deneme sayılmaz)"
+                    ));
+                }
+                if r.created_ts + NANOS_PER_DAY > now.0 {
+                    today.insert(hid);
+                }
+            }
+        }
+        if today.len() >= DAILY_LIMIT {
+            return Err(format!(
+                "günlük hipotez sınırı ({DAILY_LIMIT}) doldu; deneme sayacı şişmesin diye"
+            ));
+        }
+        used_today = today.len();
+        Ok(())
+    })?
+    .map_err(|e| anyhow!(e))?;
     Ok(json!({
         "id": id,
         "queued": vs.len(),
         "trials_counted": vs.len(),
-        "daily_left": DAILY_LIMIT - today.len() - 1,
+        "daily_left": DAILY_LIMIT - used_today - 1,
         "genome": base,
     }))
 }

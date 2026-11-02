@@ -486,7 +486,8 @@ fn run(cli: Cli, out: &Out) -> Result<bool> {
             HypothesisCmd::Submit { json } => {
                 let mut t = json.join(" ");
                 if t.trim().is_empty() {
-                    std::io::stdin().read_to_string(&mut t)?;
+                    // Okuma baştan sınırlı: sınırı aşan girdi belleğe alınmadan reddedilir.
+                    std::io::stdin().take(20_001).read_to_string(&mut t)?;
                 }
                 if t.len() > 20_000 {
                     bail!("hipotez en fazla 20 KB");
